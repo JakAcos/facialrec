@@ -31,12 +31,19 @@ const UPLOAD_URL_SECONDS = 15 * 60;
  */
 const VIEW_URL_SECONDS = 15 * 60;
 /**
- * How long a signed upload form can still write to its bucket key, plus a
- * safety margin. Until this has passed, the file's quota stays reserved,
- * even if the upload was abandoned or the file was deleted, because the
- * form could still be used to put an object there.
+ * How long after it was issued an upload form can still put an object at
+ * its bucket key. The form itself stops being accepted after
+ * UPLOAD_URL_SECONDS, but the bucket checks that when an upload starts, not
+ * when it ends, so a slow upload can land long afterwards. The extra hour
+ * covers that.
+ *
+ * Until this has passed, the file's quota stays reserved, even if the
+ * upload was abandoned or the file was deleted, and its key is deleted once
+ * more at the end.
  */
-export const UPLOAD_FORM_LIFETIME_MS = (UPLOAD_URL_SECONDS + 60) * 1000;
+export const UPLOAD_FORM_LIFETIME_MS =
+  UPLOAD_URL_SECONDS * 1000 + 60 * 60 * 1000;
+const DELETE_RETRY_MS = 10 * 60 * 1000;
 
 function formStillUsable(file: Doc<"files">): boolean {
   return file.createdAt + UPLOAD_FORM_LIFETIME_MS > Date.now();
@@ -251,8 +258,12 @@ export const usage = query({
       entry.count += 1;
       byKind.set(kind, entry);
     }
+    const used = files.reduce((sum, f) => sum + f.size, 0);
     return {
-      used: files.reduce((sum, f) => sum + f.size, 0),
+      used,
+      // Space still held by uploads in progress and by recently deleted
+      // files. It counts against the limit until it is released.
+      reserved: (await usedBytes(ctx, userId)) - used,
       limit: STORAGE_LIMIT_BYTES,
       fileCount: files.length,
       byKind: [...byKind.entries()]
@@ -370,9 +381,29 @@ export const move = mutation({
 });
 
 /**
- * Removes one file's database row and returns its bucket key. A file whose
- * upload form is still usable is kept as a hidden "deleted" row instead, so
- * its quota stays reserved until the form expires (see cleanupPending).
+ * Records bucket keys to delete. The delete itself happens in
+ * processDeletes, which only forgets a key once the bucket has confirmed.
+ */
+export async function queueObjectDeletes(
+  ctx: MutationCtx,
+  keys: string[],
+  notBefore: number = Date.now(),
+): Promise<void> {
+  const real = keys.filter((k) => k.length > 0);
+  if (real.length === 0) return;
+  for (const storageKey of real) {
+    await ctx.db.insert("objectDeletes", { storageKey, notBefore });
+  }
+  if (notBefore <= Date.now()) {
+    await ctx.scheduler.runAfter(0, internal.files.processDeletes, {});
+  }
+}
+
+/**
+ * Removes one file from the vault and returns its bucket key, to be queued
+ * for deletion. A file whose upload form could still be used is kept as a
+ * hidden "deleted" row instead, so its quota stays reserved until the form
+ * can no longer write there (see cleanupPending).
  */
 async function discardFile(ctx: MutationCtx, file: Doc<"files">): Promise<string> {
   if (formStillUsable(file)) {
@@ -388,8 +419,8 @@ export const remove = mutation({
   args: { fileIds: v.array(v.id("files")), folderIds: v.array(v.id("folders")) },
   handler: async (ctx, args) => {
     const { userId } = await requireVerified(ctx);
-    const keys: string[] = [];
 
+    const keys: string[] = [];
     const queue: Id<"folders">[] = [];
     for (const folderId of args.folderIds) {
       await ownedFolder(ctx, userId, folderId);
@@ -413,19 +444,68 @@ export const remove = mutation({
       }
       keys.push(await discardFile(ctx, file));
     }
+    await queueObjectDeletes(ctx, keys);
+  },
+});
 
-    // The bucket objects follow right after the database change.
-    const real = keys.filter((k) => k.length > 0);
-    if (real.length > 0) {
-      await ctx.scheduler.runAfter(0, internal.files.deleteObjects, { keys: real });
+const DELETE_BATCH = 100;
+
+export const dueDeletes = internalQuery({
+  args: {},
+  handler: async (ctx) =>
+    await ctx.db
+      .query("objectDeletes")
+      .withIndex("by_not_before", (q) => q.lte("notBefore", Date.now()))
+      .take(DELETE_BATCH),
+});
+
+export const settleDeletes = internalMutation({
+  args: {
+    done: v.array(v.id("objectDeletes")),
+    failed: v.array(v.id("objectDeletes")),
+  },
+  handler: async (ctx, args) => {
+    // Two runs can overlap and settle the same row, so rows that are
+    // already gone are skipped.
+    for (const id of args.done) {
+      if (await ctx.db.get(id)) await ctx.db.delete(id);
+    }
+    // Failed ones stay queued and go to the back of the line, so one key
+    // that keeps failing cannot hold up the others.
+    for (const id of args.failed) {
+      if (await ctx.db.get(id)) {
+        await ctx.db.patch(id, { notBefore: Date.now() + DELETE_RETRY_MS });
+      }
     }
   },
 });
 
-export const deleteObjects = internalAction({
-  args: { keys: v.array(v.string()) },
-  handler: async (_ctx, args) => {
-    for (const key of args.keys) await deleteObject(key);
+/**
+ * Deletes queued bucket objects. Each key is tried on its own: one failure
+ * does not stop the rest, and a failed key is tried again on a later run
+ * (this also runs on a timer, see crons.ts).
+ */
+export const processDeletes = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    const due = await ctx.runQuery(internal.files.dueDeletes, {});
+    if (due.length === 0) return;
+    const done: Id<"objectDeletes">[] = [];
+    const failed: Id<"objectDeletes">[] = [];
+    for (const row of due) {
+      try {
+        await deleteObject(row.storageKey);
+        done.push(row._id);
+      } catch {
+        failed.push(row._id);
+      }
+    }
+    await ctx.runMutation(internal.files.settleDeletes, { done, failed });
+    // A full batch may mean more are waiting. Every row in this batch was
+    // either removed or pushed back, so this cannot loop on the same rows.
+    if (due.length === DELETE_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.files.processDeletes, {});
+    }
   },
 });
 
@@ -452,7 +532,8 @@ export const reserveUpload = internalMutation({
     if (args.size > remaining) {
       throw new ConvexError({
         code: "QUOTA_EXCEEDED",
-        message: "Not enough storage left for this file.",
+        message:
+          "Not enough storage left for this file. Space held by recent uploads, including deleted ones, is released within 75 minutes.",
         remaining,
       });
     }
@@ -636,10 +717,11 @@ export const folderContents = query({
 });
 
 /**
- * Housekeeping, run once the upload form for a file can no longer be used:
- * drops uploads that were never finished and deleted files that were only
- * kept to hold their quota. Their bucket keys are deleted (again) in case
- * the form was used after the file was abandoned or removed.
+ * Housekeeping, run once the upload form for a file can no longer put
+ * anything in the bucket: drops uploads that were never finished and deleted
+ * files that were only kept to hold their quota. Their bucket keys are
+ * deleted (again) in case the form was used after the file was abandoned
+ * or removed.
  */
 export const cleanupPending = internalMutation({
   args: {},
@@ -654,12 +736,10 @@ export const cleanupPending = internalMutation({
         )
         .take(200);
       for (const file of stale) {
-        if (file.storageKey.length > 0) keys.push(file.storageKey);
+        keys.push(file.storageKey);
         await ctx.db.delete(file._id);
       }
     }
-    if (keys.length > 0) {
-      await ctx.scheduler.runAfter(0, internal.files.deleteObjects, { keys });
-    }
+    await queueObjectDeletes(ctx, keys);
   },
 });

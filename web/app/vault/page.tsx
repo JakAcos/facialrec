@@ -123,7 +123,10 @@ function useThumbnails(files: VaultFile[]) {
 function StorageMeter() {
   const usage = useQuery(api.files.usage);
   if (!usage) return null;
-  const fraction = Math.min(1, usage.used / usage.limit);
+  const usedFraction = Math.min(1, usage.used / usage.limit);
+  // Held space counts against the limit too, so the percentage includes it.
+  const fraction = Math.min(1, (usage.used + usage.reserved) / usage.limit);
+  const heldFraction = fraction - usedFraction;
   return (
     <div className="flex min-w-44 flex-col gap-1.5" data-testid="storage-meter">
       <div className="flex justify-between text-xs text-muted">
@@ -133,12 +136,24 @@ function StorageMeter() {
         </span>
         <span>{Math.round(fraction * 100)}%</span>
       </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+      <div className="flex h-1.5 overflow-hidden rounded-full bg-surface-2">
         <div
-          className={cn("h-full rounded-full", fraction > 0.9 ? "bg-danger" : "bg-accent")}
-          style={{ width: `${Math.max(fraction * 100, usage.used > 0 ? 2 : 0)}%` }}
+          className={cn("h-full", fraction > 0.9 ? "bg-danger" : "bg-accent")}
+          style={{ width: `${Math.max(usedFraction * 100, usage.used > 0 ? 2 : 0)}%` }}
         />
+        {usage.reserved > 0 && (
+          <div
+            className="h-full bg-muted/40"
+            style={{ width: `${Math.max(heldFraction * 100, 1)}%` }}
+          />
+        )}
       </div>
+      {usage.reserved > 0 && (
+        <p className="text-xs text-muted" data-testid="storage-held">
+          {formatBytes(usage.reserved)} held by recent uploads, including deleted ones, for up
+          to 75 minutes
+        </p>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { convexTest } from "convex-test";
 import { test } from "vitest";
 import { Id } from "./_generated/dataModel";
+import { FACE_SESSION_MS } from "./face";
 import schema from "./schema";
 import { modules } from "./test.setup";
 
@@ -38,7 +39,7 @@ export async function signedInUser(
         sessionId,
         userId,
         verifiedAt: Date.now(),
-        expiresAt: Date.now() + 60 * 60 * 1000,
+        expiresAt: Date.now() + FACE_SESSION_MS,
       });
     }
     return { userId, sessionId };

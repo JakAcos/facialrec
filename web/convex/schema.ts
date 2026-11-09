@@ -77,4 +77,12 @@ export default defineSchema({
     .index("by_user_folder", ["userId", "folderId"])
     .index("by_user", ["userId"])
     .index("by_status", ["status", "createdAt"]),
+
+  // Bucket objects waiting to be deleted. A row is only removed once the
+  // bucket has confirmed the delete, so a failed delete is retried instead
+  // of leaving an object that nothing remembers.
+  objectDeletes: defineTable({
+    storageKey: v.string(),
+    notBefore: v.number(),
+  }).index("by_not_before", ["notBefore"]),
 });

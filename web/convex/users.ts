@@ -1,8 +1,7 @@
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { mutation, MutationCtx, query } from "./_generated/server";
-import { UPLOAD_FORM_LIFETIME_MS } from "./files";
+import { queueObjectDeletes, UPLOAD_FORM_LIFETIME_MS } from "./files";
 import { getIdentity, requireVerified } from "./lib/access";
 
 /** The signed-in user's profile, or null when signed out. */
@@ -35,23 +34,19 @@ export async function purgeUser(ctx: MutationCtx, userId: Id<"users">) {
     .query("files")
     .withIndex("by_user", (q) => q.eq("userId", userId))
     .collect();
-  const keys = files.map((f) => f.storageKey).filter((k) => k.length > 0);
   for (const f of files) await ctx.db.delete(f._id);
-  if (keys.length > 0) {
-    await ctx.scheduler.runAfter(0, internal.files.deleteObjects, { keys });
-  }
-  // A recent upload form could still write to its key after the account is
-  // gone, so those keys are deleted once more when the forms have expired.
-  const recent = files
-    .filter((f) => f.createdAt + UPLOAD_FORM_LIFETIME_MS > Date.now())
-    .map((f) => f.storageKey)
-    .filter((k) => k.length > 0);
-  if (recent.length > 0) {
-    await ctx.scheduler.runAfter(
-      UPLOAD_FORM_LIFETIME_MS,
-      internal.files.deleteObjects,
-      { keys: recent },
-    );
+  await queueObjectDeletes(
+    ctx,
+    files.map((f) => f.storageKey),
+  );
+  // A recent upload form could still put an object at its key after the
+  // account is gone, so those keys are deleted once more when that is no
+  // longer possible.
+  for (const f of files) {
+    const formDeadline = f.createdAt + UPLOAD_FORM_LIFETIME_MS;
+    if (formDeadline > Date.now()) {
+      await queueObjectDeletes(ctx, [f.storageKey], formDeadline);
+    }
   }
 
   const folders = await ctx.db

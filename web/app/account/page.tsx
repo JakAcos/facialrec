@@ -93,7 +93,21 @@ function Account() {
               title={`${k.kind}: ${formatBytes(k.bytes)}`}
             />
           ))}
+          {usage && usage.reserved > 0 && (
+            <div
+              className="bg-muted/40"
+              style={{ width: `${(usage.reserved / limit) * 100}%` }}
+              title={`Held: ${formatBytes(usage.reserved)}`}
+            />
+          )}
         </div>
+        {usage && usage.reserved > 0 && (
+          <p className="mt-2 text-xs text-muted">
+            Another {formatBytes(usage.reserved)} is held by recent uploads, including ones you
+            deleted. It counts against your limit until it is released, at most 75 minutes after
+            the upload started.
+          </p>
+        )}
         {usage && usage.byKind.length > 0 ? (
           <ul className="mt-4 grid gap-2 sm:grid-cols-2">
             {usage.byKind.map((k) => (

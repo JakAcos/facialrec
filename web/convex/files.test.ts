@@ -236,6 +236,7 @@ describe("uploads and quota", () => {
     expect(bucketCalls.filter((c) => c.method === "DELETE")).toHaveLength(1);
     expect(await errorCode(user.as.action(api.files.getUrls, { fileIds: [form.fileId] }))).toBe("NOT_FOUND");
     // ...but its 5 bytes stay reserved, so the form cannot be replayed for free space.
+    expect((await user.as.query(api.files.usage, {})).reserved).toBe(5);
     expect(
       await errorCode(user.as.action(api.files.requestUpload, { name: "again.bin", size: 100, contentType: "" })),
     ).toBe("QUOTA_EXCEEDED");
@@ -278,8 +279,14 @@ describe("uploads and quota", () => {
     expect(await errorCode(request(-1))).toBe("BAD_SIZE");
     expect(await errorCode(request(1.5))).toBe("BAD_SIZE");
 
+    // The meter shows the 60 bytes still held by the unfinished upload.
     const usage = await user.as.query(api.files.usage, {});
-    expect(usage).toMatchObject({ used: STORAGE_LIMIT_BYTES - 100, limit: STORAGE_LIMIT_BYTES, fileCount: 1 });
+    expect(usage).toMatchObject({
+      used: STORAGE_LIMIT_BYTES - 100,
+      reserved: 60,
+      limit: STORAGE_LIMIT_BYTES,
+      fileCount: 1,
+    });
   });
 
   test("duplicate upload names get a numbered suffix", async () => {
@@ -329,9 +336,61 @@ describe("account deletion", () => {
     expect(left.faceSessions).toEqual([other.userId]);
     expect(left.sessions).toEqual([other.userId]);
     // The one object is deleted at once, and once more after its upload
-    // form has expired, in case the form is used after the account is gone.
-    const deleted = bucketCalls.filter((c) => c.method === "DELETE").map((c) => c.url);
-    expect(deleted).toHaveLength(2);
-    expect(new Set(deleted).size).toBe(1);
+    // form can no longer be used, in case it is used after the account is gone.
+    const deletes = () => bucketCalls.filter((c) => c.method === "DELETE").map((c) => c.url);
+    expect(deletes()).toHaveLength(1);
+    expect(await t.run((ctx) => ctx.db.query("objectDeletes").collect())).toHaveLength(1);
+    vi.setSystemTime(Date.now() + UPLOAD_FORM_LIFETIME_MS + 1000);
+    await t.action(internal.files.processDeletes, {});
+    expect(deletes()).toHaveLength(2);
+    expect(new Set(deletes()).size).toBe(1);
+    expect(await t.run((ctx) => ctx.db.query("objectDeletes").collect())).toEqual([]);
+  });
+});
+
+describe("bucket delete queue", () => {
+  test("a failed delete stays queued and is retried, without holding up other keys", async () => {
+    vi.useFakeTimers();
+    const t = newBackend();
+    const user = await signedInUser(t, { verified: true });
+    await addFile(t, user, "a.txt");
+    await addFile(t, user, "b.txt");
+    await addFile(t, user, "c.txt");
+
+    // The bucket refuses to delete b.txt; the other two go through.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        bucketCalls.push({ method: input.method, url: input.url });
+        const fail = input.url.endsWith("/b.txt");
+        return new Response(null, { status: fail ? 500 : 204 });
+      }),
+    );
+    const all = (await user.as.query(api.files.list, {})).files.map((f) => f._id);
+    await user.as.mutation(api.files.remove, { fileIds: all, folderIds: [] });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    const tried = new Set(bucketCalls.filter((c) => c.method === "DELETE").map((c) => c.url.split("/").pop()));
+    expect(tried).toEqual(new Set(["a.txt", "b.txt", "c.txt"]));
+    const queued = await t.run((ctx) => ctx.db.query("objectDeletes").collect());
+    expect(queued.map((q) => q.storageKey.split("/").pop())).toEqual(["b.txt"]);
+
+    // Not retried straight away, so a key that keeps failing is not hammered...
+    bucketCalls.length = 0;
+    await t.action(internal.files.processDeletes, {});
+    expect(bucketCalls).toEqual([]);
+
+    // ...but a later run (the timer) deletes it once the bucket works again.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        bucketCalls.push({ method: input.method, url: input.url });
+        return new Response(null, { status: 204 });
+      }),
+    );
+    vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+    await t.action(internal.files.processDeletes, {});
+    expect(bucketCalls.map((c) => c.url.split("/").pop())).toEqual(["b.txt"]);
+    expect(await t.run((ctx) => ctx.db.query("objectDeletes").collect())).toEqual([]);
   });
 });

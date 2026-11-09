@@ -10,4 +10,10 @@ crons.interval(
   internal.files.cleanupPending,
 );
 
+crons.interval(
+  "delete queued bucket objects",
+  { minutes: 10 },
+  internal.files.processDeletes,
+);
+
 export default crons;
