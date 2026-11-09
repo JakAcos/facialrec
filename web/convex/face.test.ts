@@ -277,6 +277,33 @@ describe("face enrollment and verification", () => {
     expect((await faceCheck(next, 0)).result.ok).toBe(true);
   });
 
+  test("locking while a replacement check is running throws the result away", async () => {
+    const t = newBackend();
+    const owner = await signedInUser(t);
+    await faceCheck(owner, 0);
+    const challenge = await owner.as.mutation(api.face.startChallenge, { reenroll: true });
+    const attempt = await t.mutation(internal.face.beginAttempt, {
+      challengeId: challenge.challengeId,
+      userId: owner.userId,
+      sessionId: owner.sessionId,
+    });
+    // The vault is locked after the check started but before it finished.
+    await owner.as.mutation(api.face.lock, {});
+    const before = await t.run((ctx) => ctx.db.query("faceProfiles").unique());
+    const applied = await t.mutation(internal.face.finishAttempt, {
+      attemptId: attempt.attemptId,
+      userId: owner.userId,
+      sessionId: owner.sessionId,
+      kind: "enroll",
+      outcome: "success",
+      profileUpdatedAt: attempt.profileUpdatedAt,
+      newProfile: { encryptedTemplates: new ArrayBuffer(8), templateCount: 3, model: "m" },
+    });
+    expect(applied).toBe(false);
+    expect(await t.run((ctx) => ctx.db.query("faceProfiles").unique())).toEqual(before);
+    expect(await owner.as.query(api.face.status, {})).toMatchObject({ verified: false });
+  });
+
   test("attempts sent at the same time cannot exceed the limit", async () => {
     const t = newBackend();
     const owner = await signedInUser(t);
