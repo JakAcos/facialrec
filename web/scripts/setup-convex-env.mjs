@@ -16,31 +16,51 @@
 
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { exportJWK, exportPKCS8, generateKeyPair } from "jose";
 
 const prod = process.argv.includes("--prod");
 const convex = "./node_modules/.bin/convex";
 const target = prod ? ["--prod"] : [];
 
-function existingNames() {
-  const out = execFileSync(convex, ["env", "list", ...target], {
+/**
+ * Whether a variable already has a value. This asks for that one variable
+ * and lets any error stop the script. Guessing "missing" from unexpected
+ * output would regenerate the face encryption key, and every enrolled face
+ * would become unreadable.
+ */
+function has(name) {
+  const out = execFileSync(convex, ["env", "get", ...target, name], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
   });
-  return new Set(
-    out
-      .split("\n")
-      .map((line) => line.split("=")[0].trim())
-      .filter((name) => /^[A-Z0-9_]+$/.test(name)),
-  );
+  return out.trim().length > 0;
 }
 
+// Values are handed over in a private temporary file, not on the command
+// line, where other users of this machine could read them from `ps`.
+const scratch = mkdtempSync(path.join(tmpdir(), "convex-env-"));
+process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
+
 function set(name, value) {
-  // stdio is fully ignored so the value cannot end up in a log.
-  execFileSync(convex, ["env", "set", ...target, "--", name, value], {
-    stdio: "ignore",
-  });
+  const file = path.join(scratch, "value");
+  writeFileSync(file, value, { mode: 0o600 });
+  try {
+    // stdio is fully ignored so the value cannot end up in a log.
+    execFileSync(convex, ["env", "set", ...target, name, "--from-file", file], {
+      stdio: "ignore",
+    });
+  } finally {
+    rmSync(file, { force: true });
+  }
   console.log(`set ${name}`);
 }
 
@@ -49,9 +69,7 @@ function fromFile(envName) {
   return path && existsSync(path) ? readFileSync(path, "utf8").trim() : null;
 }
 
-const have = existingNames();
-
-if (!have.has("JWT_PRIVATE_KEY") || !have.has("JWKS")) {
+if (!has("JWT_PRIVATE_KEY") || !has("JWKS")) {
   const keys = await generateKeyPair("RS256", { extractable: true });
   const privateKey = await exportPKCS8(keys.privateKey);
   const publicKey = await exportJWK(keys.publicKey);
@@ -59,7 +77,7 @@ if (!have.has("JWT_PRIVATE_KEY") || !have.has("JWKS")) {
   set("JWKS", JSON.stringify({ keys: [{ use: "sig", ...publicKey }] }));
 }
 
-if (!have.has("FACE_ENC_KEY")) {
+if (!has("FACE_ENC_KEY")) {
   set("FACE_ENC_KEY", randomBytes(32).toString("base64"));
 }
 
