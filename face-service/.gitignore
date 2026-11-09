@@ -4,3 +4,5 @@ __pycache__/
 # Large models are downloaded by scripts/download_models.py
 models/det_10g.onnx
 models/w600k_r50.onnx
+# Cached scores from eval/lfw_eval.py
+eval/.cache/

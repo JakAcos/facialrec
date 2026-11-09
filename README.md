@@ -50,44 +50,70 @@ Why it is split this way:
 5. Convex decides (`web/convex/lib/faceDecision.ts`):
    - each frame shows exactly one clear face
    - the head really turned the way the challenge asked
-   - the anti-spoofing model thinks the straight-on frame is a live face
+   - the anti-spoofing model thinks every frame is a live face
    - all frames show the same person
    - the embeddings match the enrolled templates
-6. On success that login session is unlocked for 12 hours. Five failed
-   attempts in ten minutes lock the account for the rest of that window.
+6. On success that login session is unlocked for 12 hours, or until you
+   lock it or sign out.
 
 Enrollment is the same flow with three poses (straight, left, right). The
 three embeddings are stored AES-256-GCM encrypted. Photos are never stored.
 
-### Why a head turn
+### What the face check protects against, and what it does not
 
-A printed photo or a still image on a screen cannot turn its head. Tilting a
-flat photo squeezes the whole face evenly, so the nose stays centred between
-the eyes, and the measured turn stays at zero. A real head moves the nose
-relative to the eyes. The test suite proves both cases.
+It is a second factor on top of Google sign-in. It is strongest against
+someone using the real website:
+
+- **A stolen or shared Google login, used through the site.** The vault stays
+  locked without the owner's face in front of the camera.
+- **A photo held up to the camera.** A printed photo or a still image on a
+  screen cannot turn its head. Tilting a flat photo squeezes the whole face
+  evenly, so the nose stays centred between the eyes and the measured turn
+  stays at zero. A real head moves the nose relative to the eyes.
+- **Guessing.** Five failed checks in ten minutes lock the account, and
+  attempts sent at the same time all count.
+
+It does **not** protect against these, and you should not rely on it to:
+
+- **Image files sent straight to the backend.** The server cannot prove that
+  bytes came from a camera. Someone who has the owner's Google login and can
+  skip the page could send two ordinary photos of the owner, one straight on
+  and one turned (mirrored if the other direction is asked for), and would
+  probably pass. The anti-spoofing model looks for signs of a re-photographed
+  screen or print, which a clean digital photo does not have. Our own
+  measurement shows about 9 in 10 ordinary photos pass it.
+- **A video of the owner turning their head**, replayed to the camera or
+  sent as frames.
+- **The first enrollment.** Whoever holds the Google login when the account
+  has no face yet can enroll their own. After that, replacing the face
+  needs a session that has already passed the check.
+
+In short: the face check makes a stolen Google login much less useful to a
+casual attacker, but someone who also has photos of the owner and the skill
+to call the backend directly can get past it.
+
+There is also no recovery path if your face stops matching (for example
+after a big change in appearance). Replace your enrolled face from the
+Account page while you are still signed in.
 
 ### Accuracy
 
-`face-service/eval/lfw_eval.py` runs the exact production pipeline over the
-public LFW benchmark. The measured error rates for each match threshold are
-in [`face-service/eval/LFW_REPORT.md`](face-service/eval/LFW_REPORT.md).
+`face-service/eval/lfw_eval.py` runs the production models over the public
+LFW benchmark. The results, and what they do and do not show, are in
+[`face-service/eval/LFW_REPORT.md`](face-service/eval/LFW_REPORT.md). They
+measure face matching on still photos only, not whole logins.
 
-### Known limits
+### Model licence
 
-- A good video replay of the owner turning their head the right way could
-  pass the head-turn test. The anti-spoofing model is the defence against
-  screens, and it is not perfect. This is a strong second factor on top of
-  Google sign-in, not a replacement for it.
-- There is no recovery path if your face stops matching (for example after
-  a big change in appearance). Replace your enrolled face from the Account
-  page while you are still signed in.
-- The pretrained InsightFace models are licensed for non-commercial research
-  use only.
+The pretrained InsightFace models are licensed for non-commercial research
+use only.
 
 ## Running it locally
 
 You need Node 22, Python 3.12 with [uv](https://docs.astral.sh/uv/), ffmpeg,
-a Convex account and a Railway project with a bucket.
+a Convex account and a Railway project with two buckets (one for
+development, one for production, so test accounts never share storage or
+credentials with real ones).
 
 ```bash
 # Backend and website
@@ -132,10 +158,12 @@ Convex, the face service on Railway and the bucket. They need
 and turning their head (default `~/facialrec-data/face_enroll.mov`). That
 video is never committed.
 
-They cover: enrolling, uploading and previewing files, folders, moving,
-renaming, zip download, locking, signing back in, a different live person
-being rejected, a still photo being rejected (both by the page and by the
-server when the page is bypassed), and account deletion.
+They cover: enrolling, uploading and previewing files, the bucket refusing
+an upload that is not the reserved size, folders, moving, renaming, zip
+download, locking, signing back in, a different live person being rejected,
+one still photo held up to the camera being rejected (both by the page and
+by the server when the page's own checks are switched off), and account
+deletion. They do not cover the attacks listed above as unprotected.
 
 Google blocks automated browsers, so the tests sign in with a password
 login that only exists when `ENABLE_TEST_LOGIN=true`. That is set on the dev
