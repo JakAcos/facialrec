@@ -58,6 +58,9 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "other", label: "Other" },
 ];
 
+/** Must not exceed the limit enforced by files.getUrls. */
+const URL_BATCH = 200;
+
 function matchesFilter(file: VaultFile, filter: Filter): boolean {
   if (filter === "all") return true;
   const kind = fileKind(file.contentType, file.name);
@@ -75,11 +78,22 @@ function triggerDownload(url: string, name?: string) {
   a.remove();
 }
 
+/** Signed links last an hour on the server. Refresh ours a little before that. */
+const THUMBNAIL_MAX_AGE_MS = 50 * 60 * 1000;
+
 /** Signed thumbnail links for the images on screen, fetched in one batch. */
 function useThumbnails(files: VaultFile[]) {
   const getUrls = useAction(api.files.getUrls);
   const [urls, setUrls] = useState<Record<string, string>>({});
-  const requested = useRef(new Set<string>());
+  // When each link was requested, so a tab left open asks again before the
+  // links expire instead of showing broken images.
+  const requestedAt = useRef(new Map<string, number>());
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTick((n) => n + 1), 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const wanted = useMemo(
     () =>
@@ -91,13 +105,17 @@ function useThumbnails(files: VaultFile[]) {
   );
 
   useEffect(() => {
-    const missing = wanted.filter((id) => !requested.current.has(id));
-    if (missing.length === 0) return;
-    missing.forEach((id) => requested.current.add(id));
-    getUrls({ fileIds: missing })
+    const now = Date.now();
+    const due = wanted.filter((id) => {
+      const at = requestedAt.current.get(id);
+      return at === undefined || now - at > THUMBNAIL_MAX_AGE_MS;
+    });
+    if (due.length === 0) return;
+    due.forEach((id) => requestedAt.current.set(id, now));
+    getUrls({ fileIds: due })
       .then((fresh) => setUrls((old) => ({ ...old, ...fresh })))
-      .catch(() => missing.forEach((id) => requested.current.delete(id)));
-  }, [wanted, getUrls]);
+      .catch(() => due.forEach((id) => requestedAt.current.delete(id)));
+  }, [wanted, getUrls, tick]);
 
   return urls;
 }
@@ -242,7 +260,12 @@ function Vault() {
         toast.info("That folder is empty.", { id });
         return;
       }
-      const urls = await getUrls({ fileIds: contents.files.map((f) => f.fileId) });
+      // The backend signs at most 200 links per call, so ask in batches.
+      const urls: Record<string, string> = {};
+      for (let i = 0; i < contents.files.length; i += URL_BATCH) {
+        const batch = contents.files.slice(i, i + URL_BATCH).map((f) => f.fileId);
+        Object.assign(urls, await getUrls({ fileIds: batch }));
+      }
       const entries: Record<string, Uint8Array> = {};
       for (const entry of contents.files) {
         const res = await fetch(urls[entry.fileId]);
