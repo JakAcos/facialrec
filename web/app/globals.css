@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+:root {
+  /* Plain greys with no blue tint, black for actions, and one orange
+     accent kept for the brand mark, selection and the face guide. */
+  --background: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f2f2f2;
+  --foreground: #111111;
+  --muted: #6b6b6b;
+  --border: #e5e5e5;
+  --ink: #111111;
+  --ink-hover: #2b2b2b;
+  --ink-foreground: #ffffff;
+  --accent: #e0480f;
+  --accent-text: #b53a0c;
+  --accent-soft: #fff1ea;
+  --accent-foreground: #ffffff;
+  --danger: #d92d20;
+  --danger-soft: #fef1f0;
+  --success: #12924f;
+  --success-soft: #e9f8ef;
+  --warning: #a16207;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b0b0b;
+    --surface: #151515;
+    --surface-2: #1f1f1f;
+    --foreground: #f2f2f2;
+    --muted: #9a9a9a;
+    --border: #2a2a2a;
+    --ink: #f2f2f2;
+    --ink-hover: #d4d4d4;
+    --ink-foreground: #0b0b0b;
+    --accent: #ff6b35;
+    --accent-text: #ff8f66;
+    --accent-soft: #2a170e;
+    --accent-foreground: #0b0b0b;
+    --danger: #ff6b5e;
+    --danger-soft: #2c1614;
+    --success: #3ecf82;
+    --success-soft: #112319;
+    --warning: #eab308;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-ink: var(--ink);
+  --color-ink-hover: var(--ink-hover);
+  --color-ink-foreground: var(--ink-foreground);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(2px);
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}

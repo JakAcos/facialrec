@@ -1,0 +1,63 @@
+{
+  "pairs_total": 6000,
+  "pairs_scored": 6000,
+  "pairs_without_detected_face": 0,
+  "same_pairs_without_detected_face": 0,
+  "same_pairs": 3000,
+  "different_pairs": 3000,
+  "accuracy_lfw_protocol_on_scored_pairs": 0.9984999999999999,
+  "accuracy_lfw_protocol_std": 0.0017400510848184195,
+  "accuracy_counting_undetected_as_errors": 0.9985,
+  "deployed_threshold": 0.4,
+  "accuracy_at_deployed_threshold": 0.9936666666666667,
+  "same_score_mean": 0.6716212868553897,
+  "same_score_p01": 0.3931446349620819,
+  "different_score_mean": 0.004134269933449105,
+  "different_score_max": 0.2306879460811615,
+  "thresholds": [
+    {
+      "threshold": 0.25,
+      "false_accepts": 0,
+      "false_rejects": 8,
+      "false_rejects_including_undetected": 8
+    },
+    {
+      "threshold": 0.3,
+      "false_accepts": 0,
+      "false_rejects": 12,
+      "false_rejects_including_undetected": 12
+    },
+    {
+      "threshold": 0.35,
+      "false_accepts": 0,
+      "false_rejects": 18,
+      "false_rejects_including_undetected": 18
+    },
+    {
+      "threshold": 0.4,
+      "false_accepts": 0,
+      "false_rejects": 38,
+      "false_rejects_including_undetected": 38
+    },
+    {
+      "threshold": 0.45,
+      "false_accepts": 0,
+      "false_rejects": 77,
+      "false_rejects_including_undetected": 77
+    },
+    {
+      "threshold": 0.5,
+      "false_accepts": 0,
+      "false_rejects": 161,
+      "false_rejects_including_undetected": 161
+    },
+    {
+      "threshold": 0.55,
+      "false_accepts": 0,
+      "false_rejects": 303,
+      "false_rejects_including_undetected": 303
+    }
+  ],
+  "live_score_mean_on_lfw_photos": 0.8659158126079635,
+  "live_score_below_half_fraction": 0.09391666666666666
+}
