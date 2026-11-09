@@ -75,7 +75,6 @@ function FaceCheck() {
         const result = await submit({ challengeId, frames: buffers });
         if (result.ok) {
           setPhase({ name: "success" });
-          setTimeout(() => router.replace(reenroll ? "/account" : "/vault"), 900);
         } else {
           setPhase({
             name: "failed",
@@ -91,8 +90,22 @@ function FaceCheck() {
         );
       }
     },
-    [submit, router, reenroll],
+    [submit],
   );
+
+  // After a short "success" moment, move on. The timer is cancelled if this
+  // screen goes away first (the route guard also redirects once the session
+  // is unlocked). Without that, a late redirect could land after the vault
+  // had opened and throw the user back out of a folder they had just entered.
+  const succeeded = phase.name === "success";
+  useEffect(() => {
+    if (!succeeded) return;
+    const timer = setTimeout(
+      () => router.replace(reenroll ? "/account" : "/vault"),
+      900,
+    );
+    return () => clearTimeout(timer);
+  }, [succeeded, router, reenroll]);
 
   const title = enrolling
     ? reenroll

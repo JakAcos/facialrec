@@ -80,50 +80,71 @@ export function FaceCapture({
   const done = stepIndex >= steps.length;
 
   // --- Camera -------------------------------------------------------------
-  const startCamera = useCallback(async (wanted: string | null) => {
-    setCameraError(null);
-    setCameraReady(false);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError({
-        title: "Camera is not available",
-        detail: "This page needs a secure (https) connection to use the camera.",
-      });
-      return;
-    }
-    const base = { width: { ideal: 1280 }, height: { ideal: 720 } };
-    try {
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: wanted
-            ? { ...base, deviceId: { exact: wanted } }
-            : { ...base, facingMode: "user" },
-        });
-      } catch (error) {
-        // A remembered camera may have been unplugged: fall back to any camera.
-        if (!wanted) throw error;
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { ...base, facingMode: "user" },
-        });
-      }
-      streamRef.current = stream;
-      const video = videoRef.current;
-      if (!video) return;
-      video.srcObject = stream;
-      await video.play().catch(() => undefined);
-      setCameraReady(true);
+  // Each request for the camera gets a number. If a newer request has been
+  // made, or the screen has been left, by the time the camera answers, that
+  // late stream is switched off straight away. Otherwise the camera (and its
+  // light) would stay on with nothing showing it.
+  const cameraRequest = useRef(0);
 
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      setCameras(devices.filter((d) => d.kind === "videoinput"));
-      const active = stream.getVideoTracks()[0]?.getSettings().deviceId ?? null;
-      setDeviceId(active);
-    } catch (error) {
-      setCameraError(describeCameraError(error));
-    }
+  const stopCamera = useCallback(() => {
+    cameraRequest.current += 1;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
   }, []);
+
+  const startCamera = useCallback(
+    async (wanted: string | null) => {
+      stopCamera();
+      const request = cameraRequest.current;
+      const superseded = () => request !== cameraRequest.current;
+      setCameraError(null);
+      setCameraReady(false);
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError({
+          title: "Camera is not available",
+          detail: "This page needs a secure (https) connection to use the camera.",
+        });
+        return;
+      }
+      const base = { width: { ideal: 1280 }, height: { ideal: 720 } };
+      const open = (video: MediaTrackConstraints) =>
+        navigator.mediaDevices.getUserMedia({ audio: false, video });
+      try {
+        let stream: MediaStream;
+        try {
+          stream = await open(
+            wanted
+              ? { ...base, deviceId: { exact: wanted } }
+              : { ...base, facingMode: "user" },
+          );
+        } catch (error) {
+          // A remembered camera may have been unplugged: fall back to any camera.
+          if (!wanted || superseded()) throw error;
+          stream = await open({ ...base, facingMode: "user" });
+        }
+        if (superseded()) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (!video) return;
+        video.srcObject = stream;
+        await video.play().catch(() => undefined);
+        if (superseded()) return;
+        setCameraReady(true);
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (superseded()) return;
+        setCameras(devices.filter((d) => d.kind === "videoinput"));
+        const active = stream.getVideoTracks()[0]?.getSettings().deviceId ?? null;
+        setDeviceId(active);
+      } catch (error) {
+        if (!superseded()) setCameraError(describeCameraError(error));
+      }
+    },
+    [stopCamera],
+  );
 
   useEffect(() => {
     let saved: string | null = null;
@@ -132,11 +153,8 @@ export function FaceCapture({
     } catch {}
     // eslint-disable-next-line react-hooks/set-state-in-effect -- starting the camera is the effect
     void startCamera(saved);
-    return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    };
-  }, [startCamera]);
+    return stopCamera;
+  }, [startCamera, stopCamera]);
 
   const chooseCamera = (id: string) => {
     try {

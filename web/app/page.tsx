@@ -87,7 +87,7 @@ const STEPS = [
   {
     icon: ScanFace,
     title: "Confirm it is really you",
-    body: "A quick look at the camera and a head turn. A photo or a stolen password is not enough.",
+    body: "A quick look at the camera and a head turn, so a stolen password alone does not open your files.",
   },
   {
     icon: CloudUpload,
