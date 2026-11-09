@@ -9,7 +9,11 @@ export type Pose = {
   yaw: number;
   /** About 0.5 is level. Lower is looking up, higher is looking down. */
   pitch: number;
-  /** Face width as a fraction of the frame width. */
+  /**
+   * Face width as a fraction of the frame's shorter side. Using the shorter
+   * side keeps "too close" and "too far" meaning the same thing on a wide
+   * laptop camera and on a tall phone camera.
+   */
   faceWidth: number;
   /** Face centre, as fractions of the frame. */
   centerX: number;
@@ -70,7 +74,7 @@ export function measurePose(
   return {
     yaw,
     pitch,
-    faceWidth: maxX - minX,
+    faceWidth: ((maxX - minX) * width) / Math.min(width, height),
     centerX: (minX + maxX) / 2,
     centerY: (minY + maxY) / 2,
   };
@@ -85,8 +89,8 @@ export const CAPTURE = {
   centerPitch: [0.36, 0.62] as const,
   turnMinYaw: 0.28,
   turnMaxYaw: 0.85,
-  minFaceWidth: 0.17,
-  maxFaceWidth: 0.62,
+  minFaceWidth: 0.28,
+  maxFaceWidth: 0.92,
   /** How many good readings in a row before a frame is taken. */
   holdTicks: 3,
 };

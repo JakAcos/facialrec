@@ -6,6 +6,7 @@ import {
   internalMutation,
   mutation,
   query,
+  QueryCtx,
 } from "./_generated/server";
 import { getIdentity, isFaceVerified, requireIdentity } from "./lib/access";
 import { decryptTemplates, encryptTemplates } from "./lib/faceCrypto";
@@ -31,7 +32,7 @@ const MAX_FRAME_BYTES = 600 * 1024;
 type Kind = "enroll" | "verify";
 
 async function lockedUntil(
-  ctx: { db: import("./_generated/server").QueryCtx["db"] },
+  ctx: Pick<QueryCtx, "db">,
   userId: Id<"users">,
   kind: Kind,
 ): Promise<number | null> {
