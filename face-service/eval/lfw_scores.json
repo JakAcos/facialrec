@@ -4,65 +4,65 @@
   "pairs_without_detected_face": 43,
   "same_pairs": 2980,
   "different_pairs": 2977,
-  "accuracy_10fold_mean": 0.9840525069088037,
-  "accuracy_10fold_std": 0.004763290333503445,
-  "same_score_mean": 0.6536645037382232,
-  "same_score_p01": -0.010416796076310013,
-  "different_score_mean": 0.004314816352301983,
-  "different_score_max": 0.24280186886900001,
-  "different_score_p999": 0.21780529256966547,
+  "accuracy_10fold_mean": 0.9984896508939146,
+  "accuracy_10fold_std": 0.001751756494018135,
+  "same_score_mean": 0.6719292433232369,
+  "same_score_p01": 0.39299140334129334,
+  "different_score_mean": 0.004158688647119434,
+  "different_score_max": 0.2306879460811615,
+  "different_score_p999": 0.211800677061083,
   "thresholds": [
     {
       "threshold": 0.25,
       "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.03154362416107383,
-      "false_rejects": 94
+      "frr": 0.0026845637583892616,
+      "false_rejects": 8
     },
     {
       "threshold": 0.3,
       "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.032885906040268455,
-      "false_rejects": 98
+      "frr": 0.004026845637583893,
+      "false_rejects": 12
     },
     {
       "threshold": 0.35,
       "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.0348993288590604,
-      "false_rejects": 104
+      "frr": 0.006040268456375839,
+      "false_rejects": 18
     },
     {
       "threshold": 0.4,
       "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.0412751677852349,
-      "false_rejects": 123
+      "frr": 0.012751677852348993,
+      "false_rejects": 38
     },
     {
       "threshold": 0.45,
       "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.05402684563758389,
-      "false_rejects": 161
+      "frr": 0.025503355704697986,
+      "false_rejects": 76
     },
     {
       "threshold": 0.5,
       "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.07953020134228188,
-      "false_rejects": 237
+      "frr": 0.053355704697986575,
+      "false_rejects": 159
     },
     {
       "threshold": 0.55,
       "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.12583892617449666,
-      "false_rejects": 375
+      "frr": 0.10067114093959731,
+      "false_rejects": 300
     }
   ],
-  "live_score_mean_on_lfw_photos": 0.8660022355896502,
-  "live_score_below_half_fraction": 0.09350344132952829,
-  "seconds": 1913.5
+  "live_score_mean_on_lfw_photos": 0.8661999032029092,
+  "live_score_below_half_fraction": 0.09383918079570254,
+  "seconds": 757.2
 }

@@ -37,8 +37,10 @@ export type Decision =
   | { ok: true; bestScore: number }
   | { ok: false; reason: FailureReason; step?: Step };
 
-// Thresholds. MATCH and TURNED_MATCH come from the LFW evaluation in
-// face-service/eval (see the report there for the measured error rates).
+// Thresholds. The match values come from running this exact pipeline over
+// the LFW benchmark (face-service/eval/LFW_REPORT.md): across 2,977 pairs of
+// different people the highest similarity was 0.23, and at 0.40 there were
+// no false accepts while 1.3% of same-person still photos were rejected.
 export const THRESHOLDS = {
   minDetScore: 0.6,
   minFaceSize: 80,
@@ -50,9 +52,9 @@ export const THRESHOLDS = {
   centerPitch: [0.28, 0.7],
   minLiveScore: 0.5,
   /** Cosine similarity needed between a straight-on frame and an enrolled template. */
-  match: 0.45,
+  match: 0.4,
   /** Turned faces embed less reliably, so they get a slightly lower bar. */
-  turnedMatch: 0.38,
+  turnedMatch: 0.33,
   /** Frames within one submission must show the same person. */
   consistency: 0.35,
 } as const;
