@@ -66,10 +66,12 @@ someone using the real website:
 
 - **A stolen or shared Google login, used through the site.** The vault stays
   locked without the owner's face in front of the camera.
-- **A photo held up to the camera.** A printed photo or a still image on a
-  screen cannot turn its head. Tilting a flat photo squeezes the whole face
-  evenly, so the nose stays centred between the eyes and the measured turn
-  stays at zero. A real head moves the nose relative to the eyes.
+- **A single still photo held up to the camera.** One flat photo cannot turn
+  its head. Tilting it squeezes the whole face evenly, so the nose stays
+  centred between the eyes and the measured turn stays at zero. A real head
+  moves the nose relative to the eyes. What the tests actually show is that
+  one frozen frame fed in as the camera is rejected. Bent or tilted prints
+  held close to the lens have not been tested.
 - **Guessing.** Five failed checks in ten minutes lock the account, and
   attempts sent at the same time all count.
 
@@ -84,6 +86,10 @@ It does **not** protect against these, and you should not rely on it to:
   measurement shows about 9 in 10 ordinary photos pass it.
 - **A video of the owner turning their head**, replayed to the camera or
   sent as frames.
+- **Two photos shown one after the other on a screen**, one straight on and
+  one turned. This is the attack above done through the real camera. Only the
+  anti-spoofing model stands in its way, and how well it catches this has not
+  been measured.
 - **The first enrollment.** Whoever holds the Google login when the account
   has no face yet can enroll their own. After that, replacing the face
   needs a session that has already passed the check.
