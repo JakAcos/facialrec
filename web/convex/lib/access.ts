@@ -25,18 +25,32 @@ export async function requireIdentity(ctx: {
   return identity;
 }
 
-/** True when this login session has passed its face check and it has not expired. */
+/**
+ * True when this login session has passed its face check, the check has not
+ * expired, and the login session itself still exists.
+ *
+ * The last part matters after signing out: a login token stays technically
+ * valid for a while, so a copy of it taken earlier must stop opening the
+ * vault as soon as the session it belongs to is gone.
+ */
 export async function isFaceVerified(
   ctx: QueryCtx | MutationCtx,
   identity: Identity,
 ): Promise<boolean> {
+  const now = Date.now();
+  const login = await ctx.db.get(identity.sessionId);
+  if (
+    login === null ||
+    login.userId !== identity.userId ||
+    login.expirationTime < now
+  ) {
+    return false;
+  }
   const row = await ctx.db
     .query("faceSessions")
     .withIndex("by_session", (q) => q.eq("sessionId", identity.sessionId))
     .unique();
-  return (
-    row !== null && row.userId === identity.userId && row.expiresAt > Date.now()
-  );
+  return row !== null && row.userId === identity.userId && row.expiresAt > now;
 }
 
 export async function assertFaceVerified(

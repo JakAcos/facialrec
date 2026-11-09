@@ -129,7 +129,17 @@ export const startChallenge = mutation({
   },
 });
 
-/** Marks a challenge as used (each one works once) and loads what the check needs. */
+/** A reserved attempt that has not been decided yet. Counts as a failure until it is. */
+const PENDING = "PENDING";
+
+/**
+ * Marks a challenge as used (each one works once), reserves one attempt
+ * against the lockout limit, and loads what the check needs.
+ *
+ * The attempt is reserved here, before the slow call to the face service,
+ * so that many submissions sent at the same time cannot all slip past the
+ * limit before the first failure is recorded.
+ */
 export const beginAttempt = internalMutation({
   args: {
     challengeId: v.id("faceChallenges"),
@@ -150,6 +160,29 @@ export const beginAttempt = internalMutation({
         message: "That face check expired. Please start again.",
       });
     }
+    const profile = await ctx.db
+      .query("faceProfiles")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique();
+
+    // The rules are checked again now, not only when the challenge was
+    // issued. An enrollment challenge handed out while the account had no
+    // face must not be able to overwrite a face enrolled since then.
+    if (challenge.kind === "enroll" && profile !== null) {
+      if (!(await isFaceVerified(ctx, args))) {
+        throw new ConvexError({
+          code: "FACE_NOT_VERIFIED",
+          message: "Verify your face before replacing it.",
+        });
+      }
+    }
+    if (challenge.kind === "verify" && profile === null) {
+      throw new ConvexError({
+        code: "CHALLENGE_EXPIRED",
+        message: "That face check expired. Please start again.",
+      });
+    }
+
     const locked = await lockedUntil(ctx, args.userId, challenge.kind);
     if (locked !== null) {
       throw new ConvexError({
@@ -159,26 +192,44 @@ export const beginAttempt = internalMutation({
       });
     }
     await ctx.db.patch(challenge._id, { used: true });
-    const profile = await ctx.db
-      .query("faceProfiles")
-      .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .unique();
+    const attemptId = await ctx.db.insert("faceAttempts", {
+      userId: args.userId,
+      kind: challenge.kind,
+      success: false,
+      reason: PENDING,
+      at: Date.now(),
+    });
     return {
+      attemptId,
       kind: challenge.kind,
       steps: challenge.steps,
       encryptedTemplates: profile?.encryptedTemplates ?? null,
+      // Which enrollment this attempt was judged against (null: none yet).
+      profileUpdatedAt: profile?.updatedAt ?? null,
     };
   },
 });
 
-/** Records the outcome and, on success, unlocks this login session. */
+/**
+ * Records the outcome of a reserved attempt and, on success, unlocks this
+ * login session. Returns false when a passing result could not be applied
+ * because the account's enrolled face changed while the check was running.
+ */
 export const finishAttempt = internalMutation({
   args: {
+    attemptId: v.id("faceAttempts"),
     userId: v.id("users"),
     sessionId: v.id("authSessions"),
     kind: v.union(v.literal("enroll"), v.literal("verify")),
-    success: v.boolean(),
+    outcome: v.union(
+      v.literal("success"),
+      v.literal("failure"),
+      // The check could not be carried out (for example the face service
+      // was unreachable). Nothing was learned, so it does not count.
+      v.literal("void"),
+    ),
     reason: v.optional(v.string()),
+    profileUpdatedAt: v.union(v.number(), v.null()),
     newProfile: v.optional(
       v.object({
         encryptedTemplates: v.bytes(),
@@ -187,22 +238,41 @@ export const finishAttempt = internalMutation({
       }),
     ),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<boolean> => {
     const now = Date.now();
-    await ctx.db.insert("faceAttempts", {
-      userId: args.userId,
-      kind: args.kind,
-      success: args.success,
-      reason: args.reason,
+    if (args.outcome === "void") {
+      await ctx.db.delete(args.attemptId);
+      return false;
+    }
+    if (args.outcome === "failure") {
+      await ctx.db.patch(args.attemptId, { reason: args.reason, at: now });
+      return false;
+    }
+
+    const existing = await ctx.db
+      .query("faceProfiles")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique();
+    // The face service call takes a moment. If the enrolled face changed in
+    // the meantime, this result was judged against the old one: discard it.
+    const unchanged = (existing?.updatedAt ?? null) === args.profileUpdatedAt;
+    // Replacing a face needs the session to still be unlocked at this instant.
+    const mayReplace =
+      args.kind !== "enroll" ||
+      existing === null ||
+      (await isFaceVerified(ctx, args));
+    if (!unchanged || !mayReplace) {
+      await ctx.db.patch(args.attemptId, { reason: "PROFILE_CHANGED", at: now });
+      return false;
+    }
+
+    await ctx.db.patch(args.attemptId, {
+      success: true,
+      reason: undefined,
       at: now,
     });
-    if (!args.success) return;
 
     if (args.newProfile) {
-      const existing = await ctx.db
-        .query("faceProfiles")
-        .withIndex("by_user", (q) => q.eq("userId", args.userId))
-        .unique();
       const doc = { userId: args.userId, ...args.newProfile, updatedAt: now };
       if (existing) await ctx.db.replace(existing._id, doc);
       else await ctx.db.insert("faceProfiles", doc);
@@ -220,6 +290,7 @@ export const finishAttempt = internalMutation({
     };
     if (session) await ctx.db.replace(session._id, fields);
     else await ctx.db.insert("faceSessions", fields);
+    return true;
   },
 });
 
@@ -232,6 +303,12 @@ function toBase64(buf: ArrayBuffer): string {
   }
   return btoa(bin);
 }
+
+type NewProfile = {
+  encryptedTemplates: ArrayBuffer;
+  templateCount: number;
+  model: string;
+};
 
 type ServiceFrame = {
   face_count: number;
@@ -298,13 +375,34 @@ export const submit = action({
       ...identity,
     });
     const steps = attempt.steps as Step[];
+    const finish = (
+      outcome: "success" | "failure" | "void",
+      extra: { reason?: string; newProfile?: NewProfile } = {},
+    ) =>
+      ctx.runMutation(internal.face.finishAttempt, {
+        ...identity,
+        attemptId: attempt.attemptId,
+        kind: attempt.kind,
+        profileUpdatedAt: attempt.profileUpdatedAt,
+        outcome,
+        ...extra,
+      });
 
     let decision: Decision;
     let analysis: { frames: FrameAnalysis[]; model: string } | null = null;
     if (args.frames.length !== steps.length) {
       decision = { ok: false, reason: "WRONG_FRAME_COUNT" };
     } else {
-      analysis = await analyzeFrames(args.frames);
+      try {
+        analysis = await analyzeFrames(args.frames);
+      } catch {
+        // Not the user's fault, so it must not eat into their attempts.
+        await finish("void");
+        throw new ConvexError({
+          code: "FACE_SERVICE_UNAVAILABLE",
+          message: "The face check is temporarily unavailable. Please try again.",
+        });
+      }
       if (attempt.kind === "enroll") {
         decision = decideEnroll(steps, analysis.frames);
       } else {
@@ -315,8 +413,18 @@ export const submit = action({
       }
     }
 
-    let newProfile;
-    if (decision.ok && attempt.kind === "enroll" && analysis) {
+    if (!decision.ok) {
+      await finish("failure", { reason: decision.reason });
+      return {
+        ok: false,
+        kind: attempt.kind,
+        reason: decision.reason,
+        message: FAILURE_MESSAGES[decision.reason],
+      };
+    }
+
+    let newProfile: NewProfile | undefined;
+    if (attempt.kind === "enroll" && analysis) {
       const templates = analysis.frames.map((f) => f.embedding);
       newProfile = {
         encryptedTemplates: await encryptTemplates(templates),
@@ -324,22 +432,16 @@ export const submit = action({
         model: analysis.model,
       };
     }
-
-    await ctx.runMutation(internal.face.finishAttempt, {
-      ...identity,
-      kind: attempt.kind,
-      success: decision.ok,
-      reason: decision.ok ? undefined : decision.reason,
-      newProfile,
-    });
-
-    if (decision.ok) return { ok: true, kind: attempt.kind };
-    return {
-      ok: false,
-      kind: attempt.kind,
-      reason: decision.reason,
-      message: FAILURE_MESSAGES[decision.reason],
-    };
+    const applied = await finish("success", { newProfile });
+    if (!applied) {
+      return {
+        ok: false,
+        kind: attempt.kind,
+        reason: "PROFILE_CHANGED",
+        message: "Your enrolled face changed during this check. Please try again.",
+      };
+    }
+    return { ok: true, kind: attempt.kind };
   },
 });
 

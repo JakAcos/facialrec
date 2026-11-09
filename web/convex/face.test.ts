@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 import { MAX_FAILED_VERIFIES } from "./face";
 import {
   errorCode,
@@ -211,6 +212,109 @@ describe("face enrollment and verification", () => {
     expect((await faceCheck(next, 3)).result.ok).toBe(true);
   });
 
+  test("an enrollment challenge issued before a face existed cannot overwrite it later", async () => {
+    const t = newBackend();
+    const owner = await signedInUser(t);
+    const thief = await signedInUser(t, { userId: owner.userId });
+
+    // Both sessions ask to enroll while the account has no face yet.
+    const stale = await thief.as.mutation(api.face.startChallenge, {});
+    expect(stale.kind).toBe("enroll");
+    expect((await faceCheck(owner, 0)).result.ok).toBe(true);
+
+    // The thief's old challenge is still unexpired, but must not work now.
+    nextFrames = stale.steps.map((s) => serviceFrame(s, 7));
+    expect(
+      await errorCode(
+        thief.as.action(api.face.submit, { challengeId: stale.challengeId, frames: stale.steps.map(jpeg) }),
+      ),
+    ).toBe("FACE_NOT_VERIFIED");
+    expect(await thief.as.query(api.face.status, {})).toMatchObject({ verified: false });
+    const next = await signedInUser(t, { userId: owner.userId });
+    expect((await faceCheck(next, 0)).result.ok).toBe(true);
+  });
+
+  test("two enrollments racing each other: only the first one is kept", async () => {
+    const t = newBackend();
+    const a = await signedInUser(t);
+    const b = await signedInUser(t, { userId: a.userId });
+    const ca = await a.as.mutation(api.face.startChallenge, {});
+    const cb = await b.as.mutation(api.face.startChallenge, {});
+    // Both pass the start-of-attempt checks before either has finished.
+    const begin = (u: typeof a, challengeId: typeof ca.challengeId) =>
+      t.mutation(internal.face.beginAttempt, { challengeId, userId: u.userId, sessionId: u.sessionId });
+    const [attemptA, attemptB] = [await begin(a, ca.challengeId), await begin(b, cb.challengeId)];
+    const profile = { encryptedTemplates: new ArrayBuffer(8), templateCount: 3, model: "m" };
+    const finish = (u: typeof a, attempt: typeof attemptA) =>
+      t.mutation(internal.face.finishAttempt, {
+        attemptId: attempt.attemptId,
+        userId: u.userId,
+        sessionId: u.sessionId,
+        kind: "enroll",
+        outcome: "success",
+        profileUpdatedAt: attempt.profileUpdatedAt,
+        newProfile: profile,
+      });
+    expect(await finish(a, attemptA)).toBe(true);
+    expect(await finish(b, attemptB)).toBe(false);
+    expect(await a.as.query(api.face.status, {})).toMatchObject({ enrolled: true, verified: true });
+    expect(await b.as.query(api.face.status, {})).toMatchObject({ enrolled: true, verified: false });
+  });
+
+  test("a replacement challenge stops working once its session is locked", async () => {
+    const t = newBackend();
+    const owner = await signedInUser(t);
+    await faceCheck(owner, 0);
+    const challenge = await owner.as.mutation(api.face.startChallenge, { reenroll: true });
+    await owner.as.mutation(api.face.lock, {});
+    nextFrames = challenge.steps.map((s) => serviceFrame(s, 7));
+    expect(
+      await errorCode(
+        owner.as.action(api.face.submit, { challengeId: challenge.challengeId, frames: challenge.steps.map(jpeg) }),
+      ),
+    ).toBe("FACE_NOT_VERIFIED");
+    const next = await signedInUser(t, { userId: owner.userId });
+    expect((await faceCheck(next, 0)).result.ok).toBe(true);
+  });
+
+  test("attempts sent at the same time cannot exceed the limit", async () => {
+    const t = newBackend();
+    const owner = await signedInUser(t);
+    await faceCheck(owner, 0);
+    const session = await signedInUser(t, { userId: owner.userId });
+    const ids: Id<"faceChallenges">[] = [];
+    for (let i = 0; i < MAX_FAILED_VERIFIES + 1; i++) {
+      ids.push((await session.as.mutation(api.face.startChallenge, {})).challengeId);
+    }
+    // Start them all before any has an answer from the face service.
+    const begin = (challengeId: Id<"faceChallenges">) =>
+      t.mutation(internal.face.beginAttempt, {
+        challengeId,
+        userId: session.userId,
+        sessionId: session.sessionId,
+      });
+    for (const id of ids.slice(0, MAX_FAILED_VERIFIES)) await begin(id);
+    expect(await errorCode(begin(ids[MAX_FAILED_VERIFIES]))).toBe("LOCKED");
+  });
+
+  test("a face service outage does not use up attempts", async () => {
+    const t = newBackend();
+    const owner = await signedInUser(t);
+    await faceCheck(owner, 0);
+    const session = await signedInUser(t, { userId: owner.userId });
+    fetchMock.mockImplementation(async () => new Response("down", { status: 503 }));
+    for (let i = 0; i < MAX_FAILED_VERIFIES + 2; i++) {
+      const challenge = await session.as.mutation(api.face.startChallenge, {});
+      expect(
+        await errorCode(
+          session.as.action(api.face.submit, { challengeId: challenge.challengeId, frames: challenge.steps.map(jpeg) }),
+        ),
+      ).toBe("FACE_SERVICE_UNAVAILABLE");
+    }
+    fetchMock.mockImplementation(async () => Response.json({ model: "test-model", frames: nextFrames }));
+    expect((await faceCheck(session, 0)).result.ok).toBe(true);
+  });
+
   test("locking the vault and an expired face session both block access", async () => {
     const t = newBackend();
     const user = await signedInUser(t, { verified: true });
@@ -227,6 +331,17 @@ describe("face enrollment and verification", () => {
       await ctx.db.patch(row!._id, { expiresAt: Date.now() - 1 });
     });
     expect(await errorCode(stale.as.query(api.files.list, {}))).toBe("FACE_NOT_VERIFIED");
+  });
+
+  test("after sign-out, a copied login token no longer opens the vault", async () => {
+    const t = newBackend();
+    const user = await signedInUser(t, { verified: true });
+    await user.as.query(api.files.list, {});
+    // Signing out deletes the login session. The token itself (what
+    // `user.as` stands for) would still be accepted for a while.
+    await t.run((ctx) => ctx.db.delete(user.sessionId));
+    expect(await errorCode(user.as.query(api.files.list, {}))).toBe("FACE_NOT_VERIFIED");
+    expect(await user.as.query(api.face.status, {})).toMatchObject({ verified: false });
   });
 
   test("a wrong frame count fails without calling the face service", async () => {

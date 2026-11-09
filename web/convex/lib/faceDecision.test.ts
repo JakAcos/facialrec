@@ -92,12 +92,30 @@ describe("decideVerify", () => {
     }
   });
 
-  test("rejects when the anti-spoofing model flags the center frame", () => {
-    const spoof = [frame({ liveScore: 0.2 }), good()[1]];
-    expect(decideVerify(VERIFY, spoof, templates)).toMatchObject({
+  test("rejects when the anti-spoofing model flags any frame", () => {
+    const center = [frame({ liveScore: 0.2 }), good()[1]];
+    expect(decideVerify(VERIFY, center, templates)).toEqual({
       ok: false,
       reason: "SPOOF_SUSPECTED",
+      step: "center",
     });
+    const turned = [frame(), { ...good()[1], liveScore: 0.2 }];
+    expect(decideVerify(VERIFY, turned, templates)).toEqual({
+      ok: false,
+      reason: "SPOOF_SUSPECTED",
+      step: "left",
+    });
+  });
+
+  test("KNOWN LIMIT: two different clean photos of the owner are accepted", () => {
+    // This documents a weakness rather than a strength. If someone bypasses
+    // the page and sends two image files straight to the backend (a
+    // straight-on photo and a turned one, mirrored if needed for the
+    // direction), nothing here can tell them from camera frames. The
+    // anti-spoofing score of a clean digital photo is usually high.
+    const straightPhoto = frame({ liveScore: 0.87, embedding: embedding(0, 0.7) });
+    const turnedPhoto = frame({ yaw: 0.35, liveScore: 0.8, embedding: embedding(0, 0.62) });
+    expect(decideVerify(VERIFY, [straightPhoto, turnedPhoto], templates).ok).toBe(true);
   });
 
   test("rejects mixed identities: owner's photo plus someone else's turn", () => {

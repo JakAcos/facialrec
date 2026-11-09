@@ -92,8 +92,13 @@ function poseMatches(step: Step, frame: FrameAnalysis): boolean {
 }
 
 /**
- * Checks that the frames are usable and really show a live person doing the
- * requested head movements. Shared by enrollment and verification.
+ * Checks that the frames are usable and consistent with a live person doing
+ * the requested head movements. Shared by enrollment and verification.
+ *
+ * What this can and cannot do: it stops a single photo held up to the
+ * camera. It cannot stop someone who skips the page and sends the server
+ * image files directly, for example one straight-on and one turned photo of
+ * the owner. The server has no way to know the bytes came from a camera.
  */
 export function checkLiveness(
   steps: Step[],
@@ -117,9 +122,8 @@ export function checkLiveness(
     if (!poseMatches(step, f)) {
       return { ok: false, reason: "POSE_MISMATCH", step };
     }
-    // The anti-spoofing model is trained on straight-on faces, so it is only
-    // applied to the center frames.
-    if (step === "center" && f.liveScore < THRESHOLDS.minLiveScore) {
+    // Every frame has to look like a live face, the turned ones included.
+    if (f.liveScore < THRESHOLDS.minLiveScore) {
       return { ok: false, reason: "SPOOF_SUSPECTED", step };
     }
   }
