@@ -60,3 +60,19 @@ def test_mirrored_face_flips_yaw_sign(pipeline, lfw_people):
     mirrored = pipeline.analyze(cv2.flip(image, 1))
     assert original.face_count == 1 and mirrored.face_count == 1
     assert abs(original.yaw + mirrored.yaw) < 0.08
+
+
+def test_a_face_filling_the_frame_is_still_found(pipeline, lfw_people):
+    # Someone sitting close to the camera. Cropping to the face and enlarging
+    # it gives a face too big for the detector's first pass, so this relies
+    # on the second look at half size.
+    image = bgr(lfw_people.images[0])
+    face = pipeline.detector.detect(image)[0]
+    x1, y1, x2, y2 = (int(v) for v in face.bbox)
+    pad = 12
+    crop = image[max(0, y1 - pad) : y2 + pad, max(0, x1 - pad) : x2 + pad]
+    close_up = cv2.resize(crop, None, fx=5, fy=5, interpolation=cv2.INTER_CUBIC)
+    assert pipeline.detector._detect_at(close_up, pipeline.detector.size) == []
+    found = pipeline.detector.detect(close_up)
+    assert len(found) == 1
+    assert found[0].width > 0.6 * close_up.shape[1]

@@ -67,6 +67,9 @@ def _session(name: str) -> ort.InferenceSession:
     # Idle threads should sleep rather than spin, so they do not fight over
     # a small CPU allowance.
     opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    # Errors only. The detector is run at two input sizes, and the model file
+    # declares fixed output sizes, which is harmless but logs a warning each time.
+    opts.log_severity_level = 3
     return ort.InferenceSession(
         str(MODEL_DIR / name), sess_options=opts, providers=["CPUExecutionProvider"]
     )
@@ -133,13 +136,22 @@ class Detector:
         self.nms_threshold = nms_threshold
 
     def detect(self, image_bgr: np.ndarray) -> list[Face]:
+        faces = self._detect_at(image_bgr, self.size)
+        if not faces:
+            # A face that fills most of the frame (someone sitting close to
+            # the camera) can be missed at full size. Looking again at half
+            # size makes it an ordinary-sized face for the model.
+            faces = self._detect_at(image_bgr, self.size // 2)
+        return faces
+
+    def _detect_at(self, image_bgr: np.ndarray, size: int) -> list[Face]:
         h, w = image_bgr.shape[:2]
-        scale = self.size / max(h, w)
+        scale = size / max(h, w)
         new_w, new_h = int(round(w * scale)), int(round(h * scale))
-        canvas = np.zeros((self.size, self.size, 3), dtype=np.uint8)
+        canvas = np.zeros((size, size, 3), dtype=np.uint8)
         canvas[:new_h, :new_w] = cv2.resize(image_bgr, (new_w, new_h))
         blob = cv2.dnn.blobFromImage(
-            canvas, 1.0 / 128.0, (self.size, self.size), (127.5, 127.5, 127.5), swapRB=True
+            canvas, 1.0 / 128.0, (size, size), (127.5, 127.5, 127.5), swapRB=True
         )
         outputs = self.session.run(None, {self.input_name: blob})
 
@@ -150,7 +162,7 @@ class Detector:
             box_dist = outputs[i + n].reshape(-1, 4) * stride
             point_dist = outputs[i + 2 * n].reshape(-1, 10) * stride
 
-            cells = self.size // stride
+            cells = size // stride
             ys, xs = np.mgrid[:cells, :cells]
             centers = np.stack([xs, ys], axis=-1).astype(np.float32).reshape(-1, 2) * stride
             centers = np.repeat(centers, self.ANCHORS_PER_CELL, axis=0)
