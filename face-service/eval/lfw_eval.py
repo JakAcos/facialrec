@@ -105,6 +105,7 @@ def compute(limit: int) -> dict[str, np.ndarray]:
         "folds": np.array(kept_folds),
         "live": np.array(live),
         "total_pairs": np.array(len(pairs)),
+        "total_same_pairs": np.array(int((labels == 1).sum())),
     }
 
 
@@ -114,6 +115,10 @@ def report(data: dict[str, np.ndarray], out: Path) -> dict:
     undetected = total - len(scores)
     same = scores[labels == 1]
     diff = scores[labels == 0]
+    total_same = int(data["total_same_pairs"])
+    # Same-person pairs where a face was not found. The app would turn those
+    # people away, so they are also counted as false rejects below.
+    undetected_same = total_same - len(same)
     threshold = deployed_threshold()
 
     # LFW protocol: pick the best threshold on nine folds, test on the tenth.
@@ -143,12 +148,20 @@ def report(data: dict[str, np.ndarray], out: Path) -> dict:
     rows = []
     for t in (0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55):
         fa, fr = int((diff >= t).sum()), int((same < t).sum())
-        rows.append({"threshold": t, "false_accepts": fa, "false_rejects": fr})
+        rows.append(
+            {
+                "threshold": t,
+                "false_accepts": fa,
+                "false_rejects": fr,
+                "false_rejects_including_undetected": fr + undetected_same,
+            }
+        )
 
     summary = {
         "pairs_total": total,
         "pairs_scored": int(len(scores)),
         "pairs_without_detected_face": undetected,
+        "same_pairs_without_detected_face": undetected_same,
         "same_pairs": int(len(same)),
         "different_pairs": int(len(diff)),
         "accuracy_lfw_protocol_on_scored_pairs": protocol_accuracy,
@@ -188,19 +201,22 @@ def report(data: dict[str, np.ndarray], out: Path) -> dict:
         "## Error counts by match threshold",
         "",
         "A false accept is two different people judged to be the same. A",
-        "false reject is the same person judged to be different. Where no",
+        "false reject is the same person judged to be different. The last",
+        f"column also counts the {undetected_same} same-person pairs where no face was",
+        "found, since the app would turn those people away too. Where no",
         "error was seen, the percentage is the 95% upper bound for a sample",
         "of this size (the rule of three), not a measured zero.",
         "",
-        "| Threshold | False accepts | Rate | False rejects | Rate |",
-        "|---|---|---|---|---|",
+        "| Threshold | False accepts | Rate | False rejects | Rate | Rate incl. undetected |",
+        "|---|---|---|---|---|---|",
     ]
     for row in rows:
         mark = " (used by the app)" if abs(row["threshold"] - threshold) < 1e-9 else ""
         lines.append(
             f"| {row['threshold']:.2f}{mark} | {row['false_accepts']} / {len(diff)} | "
             f"{bound(row['false_accepts'], len(diff))} | {row['false_rejects']} / {len(same)} | "
-            f"{bound(row['false_rejects'], len(same))} |"
+            f"{bound(row['false_rejects'], len(same))} | "
+            f"{bound(row['false_rejects_including_undetected'], total_same)} |"
         )
     lines += [
         "",
@@ -211,12 +227,14 @@ def report(data: dict[str, np.ndarray], out: Path) -> dict:
         "  login also needs every captured frame to pass the pose, liveness and",
         "  consistency checks, and that end-to-end rejection rate has not been",
         "  measured.",
-        f"- The app's threshold ({threshold:.2f}) was chosen by looking at this same",
-        "  data, so the figures at that threshold are not an independent test.",
+        f"- The app's match threshold ({threshold:.2f}) was chosen by looking at this",
+        "  same data, so the figures at that threshold are not an independent test.",
         "- Only the straight-on match threshold is covered. The lower threshold",
-        "  used for turned frames has not been evaluated.",
+        "  for turned frames, the frame-to-frame consistency threshold and the",
+        "  liveness threshold were set by judgement and have not been evaluated.",
         f"- With {len(diff)} different-person pairs, this cannot show a false accept",
-        f"  rate below about {3 / len(diff) * 100:.1f}%, however good the model is.",
+        f"  rate below about {3 / len(diff) * 100:.1f}%, however good the model is. The pairs",
+        "  are also random people, not look-alikes or relatives, who are harder.",
         "- The anti-spoofing score on these photos (real faces, not replays)",
         f"  averaged {live.mean():.3f}, and {(live < 0.5).mean() * 100:.1f}% scored below 0.5. So most",
         "  ordinary digital photos pass the anti-spoofing check. It is not a",
