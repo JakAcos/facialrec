@@ -1,0 +1,7 @@
+.venv
+__pycache__
+.pytest_cache
+eval
+tests
+models/det_10g.onnx
+models/w600k_r50.onnx
