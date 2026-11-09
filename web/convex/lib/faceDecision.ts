@@ -38,10 +38,12 @@ export type Decision =
   | { ok: true; bestScore: number }
   | { ok: false; reason: FailureReason; step?: Step };
 
-// Thresholds. The match values come from running this exact pipeline over
-// the LFW benchmark (face-service/eval/LFW_REPORT.md): across 2,977 pairs of
-// different people the highest similarity was 0.23, and at 0.40 there were
-// no false accepts while 1.3% of same-person still photos were rejected.
+// Thresholds. Only `match` is backed by a measurement: running the same
+// models over the LFW benchmark (face-service/eval/LFW_REPORT.md), the
+// highest similarity between two different people in 3,000 pairs was 0.23,
+// and at 0.40 there were no false accepts while 1.3% of same-person still
+// photos were rejected. That threshold was picked from that same data. The
+// other values below were set by judgement and have not been evaluated.
 export const THRESHOLDS = {
   minDetScore: 0.6,
   minFaceSize: 80,

@@ -1,68 +1,63 @@
 {
   "pairs_total": 6000,
-  "pairs_scored": 5957,
-  "pairs_without_detected_face": 43,
-  "same_pairs": 2980,
-  "different_pairs": 2977,
-  "accuracy_10fold_mean": 0.9984896508939146,
-  "accuracy_10fold_std": 0.001751756494018135,
-  "same_score_mean": 0.6719292433232369,
-  "same_score_p01": 0.39299140334129334,
-  "different_score_mean": 0.004158688647119434,
+  "pairs_scored": 6000,
+  "pairs_without_detected_face": 0,
+  "same_pairs_without_detected_face": 0,
+  "same_pairs": 3000,
+  "different_pairs": 3000,
+  "accuracy_lfw_protocol_on_scored_pairs": 0.9984999999999999,
+  "accuracy_lfw_protocol_std": 0.0017400510848184195,
+  "accuracy_counting_undetected_as_errors": 0.9985,
+  "deployed_threshold": 0.4,
+  "accuracy_at_deployed_threshold": 0.9936666666666667,
+  "same_score_mean": 0.6716212868553897,
+  "same_score_p01": 0.3931446349620819,
+  "different_score_mean": 0.004134269933449105,
   "different_score_max": 0.2306879460811615,
-  "different_score_p999": 0.211800677061083,
   "thresholds": [
     {
       "threshold": 0.25,
-      "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.0026845637583892616,
-      "false_rejects": 8
+      "false_rejects": 8,
+      "false_rejects_including_undetected": 8
     },
     {
       "threshold": 0.3,
-      "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.004026845637583893,
-      "false_rejects": 12
+      "false_rejects": 12,
+      "false_rejects_including_undetected": 12
     },
     {
       "threshold": 0.35,
-      "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.006040268456375839,
-      "false_rejects": 18
+      "false_rejects": 18,
+      "false_rejects_including_undetected": 18
     },
     {
       "threshold": 0.4,
-      "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.012751677852348993,
-      "false_rejects": 38
+      "false_rejects": 38,
+      "false_rejects_including_undetected": 38
     },
     {
       "threshold": 0.45,
-      "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.025503355704697986,
-      "false_rejects": 76
+      "false_rejects": 77,
+      "false_rejects_including_undetected": 77
     },
     {
       "threshold": 0.5,
-      "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.053355704697986575,
-      "false_rejects": 159
+      "false_rejects": 161,
+      "false_rejects_including_undetected": 161
     },
     {
       "threshold": 0.55,
-      "far": 0.0,
       "false_accepts": 0,
-      "frr": 0.10067114093959731,
-      "false_rejects": 300
+      "false_rejects": 303,
+      "false_rejects_including_undetected": 303
     }
   ],
-  "live_score_mean_on_lfw_photos": 0.8661999032029092,
-  "live_score_below_half_fraction": 0.09383918079570254,
-  "seconds": 757.2
+  "live_score_mean_on_lfw_photos": 0.8659158126079635,
+  "live_score_below_half_fraction": 0.09391666666666666
 }
