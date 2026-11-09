@@ -54,9 +54,25 @@ def main() -> None:
     def embed(image: np.ndarray) -> tuple[np.ndarray | None, float]:
         key = hashlib.sha1(image.tobytes()).hexdigest()
         if key not in cache:
-            result = pipeline.analyze(to_bgr(image))
-            vec = np.array(result.embedding) if result.embedding else None
-            cache[key] = (vec, result.live_score)
+            bgr = to_bgr(image)
+            faces = pipeline.detector.detect(bgr)
+            if not faces:
+                cache[key] = (None, 0.0)
+            else:
+                # Many LFW photos show several people, and the label refers
+                # to the one in the middle. (The live service instead uses
+                # the largest face: the person sitting at the camera.)
+                h, w = bgr.shape[:2]
+                face = min(
+                    faces,
+                    key=lambda f: np.hypot(
+                        (f.bbox[0] + f.bbox[2]) / 2 - w / 2, (f.bbox[1] + f.bbox[3]) / 2 - h / 2
+                    ),
+                )
+                cache[key] = (
+                    pipeline.embedder.embed(bgr, face),
+                    pipeline.antispoof.live_score(bgr, face),
+                )
         return cache[key]
 
     scores, kept_labels, live_scores = [], [], []
@@ -127,8 +143,10 @@ def main() -> None:
     lines = [
         "# LFW accuracy report",
         "",
-        "Produced by `eval/lfw_eval.py` running the service's own pipeline",
+        "Produced by `eval/lfw_eval.py` running the service's own models",
         "(SCRFD detector, ArcFace ResNet-50 embedding, cosine similarity).",
+        "When a photo shows several people, the face nearest the centre is",
+        "used, because that is the person the LFW label refers to.",
         "",
         f"- Pairs scored: {len(scores_arr)} of {len(pairs)} "
         f"({len(same)} same person, {len(diff)} different people)",

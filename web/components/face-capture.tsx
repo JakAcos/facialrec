@@ -300,7 +300,7 @@ export function FaceCapture({
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div
             className={cn(
-              "h-[72%] w-[58%] rounded-[50%] border-4 transition-colors duration-200 sm:w-[38%]",
+              "mb-[8%] h-[68%] w-[58%] rounded-[50%] border-4 transition-colors duration-200 sm:w-[36%]",
               done
                 ? "border-success"
                 : holding
@@ -330,6 +330,14 @@ export function FaceCapture({
             <Loader2 className="h-8 w-8 animate-spin text-white" aria-hidden />
           </div>
         )}
+        {/* The instruction sits on the camera view so it is always visible, even on a small phone. */}
+        <p
+          className="absolute inset-x-3 bottom-3 rounded-2xl bg-black/65 px-4 py-2.5 text-center text-base font-medium text-white backdrop-blur sm:text-lg"
+          aria-live="polite"
+          data-testid="face-hint"
+        >
+          {shownHint}
+        </p>
         {cameras.length > 1 && !done && (
           <select
             aria-label="Camera"
@@ -346,13 +354,6 @@ export function FaceCapture({
         )}
       </div>
 
-      <p
-        className="min-h-7 text-center text-lg font-medium"
-        aria-live="polite"
-        data-testid="face-hint"
-      >
-        {shownHint}
-      </p>
 
       <ol className="flex items-center justify-center gap-2">
         {steps.map((s, i) => (

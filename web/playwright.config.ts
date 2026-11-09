@@ -31,6 +31,11 @@ export default defineConfig({
   },
   projects: [
     {
+      // Read-only checks that are safe against the live production site.
+      name: "smoke",
+      testMatch: /smoke\.spec\.ts/,
+    },
+    {
       // A real person in front of the camera: enrolls, verifies, uses the vault.
       name: "owner",
       testMatch: /owner\.spec\.ts/,
