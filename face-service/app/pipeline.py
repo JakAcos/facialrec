@@ -19,6 +19,11 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
+# A tiny file can claim to be a huge image (a "decompression bomb") and use
+# gigabytes of memory when decoded. Camera frames arrive at about 0.3
+# megapixels, so 8 is generous.
+MAX_IMAGE_PIXELS = 8_000_000
+
 MODEL_NAME = "scrfd10g+arcface-r50-w600k+minifasnet"
 MODEL_DIR = Path(os.environ.get("FACE_MODEL_DIR", Path(__file__).parent.parent / "models"))
 
@@ -331,9 +336,53 @@ class Pipeline:
         )
 
 
+def image_size(data: bytes) -> tuple[int, int] | None:
+    """Reads (width, height) from a JPEG or PNG header without decoding it.
+
+    Returns None for any other format, which is then refused: the browser
+    only ever sends JPEG.
+    """
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR" and len(data) >= 24:
+        return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    if data[:2] != b"\xff\xd8":
+        return None
+    # JPEG: walk the segments until a start-of-frame marker, which holds the size.
+    i = 2
+    while i + 9 < len(data):
+        if data[i] != 0xFF:
+            return None
+        marker = data[i + 1]
+        if marker == 0xFF:  # padding
+            i += 1
+            continue
+        if 0xD0 <= marker <= 0xD9 or marker == 0x01:  # markers with no length
+            i += 2
+            continue
+        length = int.from_bytes(data[i + 2 : i + 4], "big")
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = int.from_bytes(data[i + 5 : i + 7], "big")
+            width = int.from_bytes(data[i + 7 : i + 9], "big")
+            return width, height
+        if length < 2:
+            return None
+        i += 2 + length
+    return None
+
+
 def decode_image(data: bytes, max_side: int = 1280) -> np.ndarray | None:
-    """Decodes JPEG/PNG bytes, shrinking very large frames to keep things fast."""
-    image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    """Decodes JPEG/PNG bytes, shrinking large frames to keep things fast.
+
+    Returns None for anything that is not a JPEG or PNG, or whose header
+    claims more than MAX_IMAGE_PIXELS. The size is checked before decoding,
+    so an oversized image never gets to use the memory.
+    """
+    size = image_size(data)
+    if size is None or size[0] <= 0 or size[1] <= 0 or size[0] * size[1] > MAX_IMAGE_PIXELS:
+        return None
+    try:
+        image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except cv2.error:
+        return None
     if image is None:
         return None
     h, w = image.shape[:2]

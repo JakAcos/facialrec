@@ -34,16 +34,87 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="facialrec face service", lifespan=lifespan, docs_url=None, redoc_url=None)
 
+# Largest request this service will read: five frames of MAX_FRAME_BYTES,
+# base64 encoded (which adds a third), plus a little JSON around them.
+MAX_BODY_BYTES = MAX_FRAMES * MAX_FRAME_BYTES * 4 // 3 + 4096
+
+
+def _secret_ok(provided: str | None) -> bool:
+    expected = os.environ.get("FACE_SERVICE_SECRET", "")
+    return bool(expected) and provided is not None and hmac.compare_digest(
+        provided.encode(), expected.encode()
+    )
+
+
+class GuardAnalyze:
+    """Rejects bad /analyze requests before any of the body is read.
+
+    FastAPI would otherwise download and parse the whole JSON body before
+    the handler gets to check the secret, so anyone on the internet could
+    make this public service buffer an enormous request.
+    """
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"] != "/analyze":
+            return await self.inner(scope, receive, send)
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+
+        if not os.environ.get("FACE_SERVICE_SECRET"):
+            return await self._reject(send, 503, "Service secret is not configured")
+        if not _secret_ok(headers.get("x-face-secret")):
+            return await self._reject(send, 401, "Unauthorized")
+        length = headers.get("content-length")
+        if length is None or not length.isdigit():
+            return await self._reject(send, 411, "Content-Length is required")
+        if int(length) > MAX_BODY_BYTES:
+            return await self._reject(send, 413, "Request too large")
+
+        # Content-Length is only a claim, so count what actually arrives.
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_BODY_BYTES:
+                    raise HTTPException(status_code=413, detail="Request too large")
+            return message
+
+        return await self.inner(scope, limited_receive, send)
+
+    @staticmethod
+    async def _reject(send, status: int, detail: str) -> None:
+        body = ('{"detail":"%s"}' % detail).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
+app.add_middleware(GuardAnalyze)
+
 
 class AnalyzeRequest(BaseModel):
     frames: list[str] = Field(min_length=1, max_length=MAX_FRAMES)
 
 
 def _check_secret(provided: str | None) -> None:
-    expected = os.environ.get("FACE_SERVICE_SECRET", "")
-    if not expected:
+    # The middleware has already checked this. It is checked again here so
+    # the handler stays safe if it is ever mounted without the middleware.
+    if not os.environ.get("FACE_SERVICE_SECRET"):
         raise HTTPException(status_code=503, detail="Service secret is not configured")
-    if provided is None or not hmac.compare_digest(provided.encode(), expected.encode()):
+    if not _secret_ok(provided):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

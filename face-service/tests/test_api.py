@@ -66,3 +66,77 @@ def test_analyze_rejects_bad_input(client):
     assert client.post("/analyze", json={"frames": [not_image]}, headers=headers).status_code == 400
     assert client.post("/analyze", json={"frames": []}, headers=headers).status_code == 422
     assert client.post("/analyze", json={"frames": [jpeg()] * 6}, headers=headers).status_code == 422
+
+
+def test_wrong_secret_is_refused_before_the_body_is_read(client):
+    # A body far over the limit, with a bad secret: must be 401, not 413 or
+    # a parse error, which shows the secret is checked before the body.
+    huge = b"x" * (main.MAX_BODY_BYTES + 1000)
+    res = client.post(
+        "/analyze",
+        content=huge,
+        headers={"x-face-secret": "nope", "content-type": "application/json"},
+    )
+    assert res.status_code == 401
+
+
+def test_oversized_request_is_refused(client):
+    huge = b"x" * (main.MAX_BODY_BYTES + 1000)
+    res = client.post(
+        "/analyze",
+        content=huge,
+        headers={"x-face-secret": "test-secret", "content-type": "application/json"},
+    )
+    assert res.status_code == 413
+
+
+def test_request_without_a_length_is_refused(client):
+    def chunks():
+        yield b'{"frames": ['
+        yield b"]}"
+
+    res = client.post(
+        "/analyze",
+        content=chunks(),
+        headers={"x-face-secret": "test-secret", "content-type": "application/json"},
+    )
+    assert res.status_code == 411
+
+
+def test_largest_legitimate_request_fits_under_the_limit():
+    frame = base64.b64encode(b"\0" * main.MAX_FRAME_BYTES)
+    body = b'{"frames":[' + b",".join(b'"' + frame + b'"' for _ in range(main.MAX_FRAMES)) + b"]}"
+    assert len(body) <= main.MAX_BODY_BYTES
+
+
+def test_decompression_bomb_is_refused_without_decoding(monkeypatch):
+    from app import pipeline
+
+    # A solid-colour image compresses to a few kilobytes however large it is.
+    side = int(pipeline.MAX_IMAGE_PIXELS**0.5) + 400
+    blank = np.zeros((side, side, 3), np.uint8)
+    for ext in (".png", ".jpg"):
+        ok, buf = cv2.imencode(ext, blank)
+        assert ok and len(buf) < 400_000
+        assert pipeline.image_size(buf.tobytes()) == (side, side)
+
+        def fail(*args, **kwargs):
+            raise AssertionError("the oversized image was decoded")
+
+        monkeypatch.setattr(pipeline.cv2, "imdecode", fail)
+        assert pipeline.decode_image(buf.tobytes()) is None
+        monkeypatch.undo()
+
+
+def test_normal_frames_decode_and_other_formats_are_refused():
+    from app.pipeline import decode_image, image_size
+
+    frame = np.zeros((480, 640, 3), np.uint8)
+    for ext in (".jpg", ".png"):
+        ok, buf = cv2.imencode(ext, frame)
+        assert image_size(buf.tobytes()) == (640, 480)
+        assert decode_image(buf.tobytes()).shape == (480, 640, 3)
+    ok, bmp = cv2.imencode(".bmp", frame)
+    assert decode_image(bmp.tobytes()) is None
+    assert decode_image(b"") is None
+    assert decode_image(b"\xff\xd8\xff") is None
