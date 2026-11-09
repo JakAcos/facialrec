@@ -8,6 +8,7 @@ import {
   itemAction,
   listFilesDirectly,
   media,
+  requestUploadDirectly,
   run,
   testLogin,
 } from "./helpers";
@@ -74,6 +75,24 @@ test("owner journey: enroll, use the vault, lock, and sign back in", async ({ pa
     await expect(thumb).toBeVisible();
     await expect.poll(() => thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(320);
     await page.screenshot({ path: test.info().outputPath("03-uploaded.png") });
+  });
+
+  await test.step("the bucket itself enforces the reserved upload size", async () => {
+    // Ask the backend for an upload form for exactly 10 bytes, then talk to
+    // the bucket directly, the way a modified client could.
+    const form = await requestUploadDirectly(page, { name: "exact.bin", size: 10, contentType: "application/octet-stream" });
+    const post = async (bytes: number) => {
+      const body = new FormData();
+      for (const [key, value] of Object.entries(form.fields)) body.append(key, value);
+      body.append("file", new Blob([new Uint8Array(bytes)]));
+      return (await fetch(form.url, { method: "POST", body })).status;
+    };
+    expect(await post(11)).toBeGreaterThanOrEqual(400); // one byte too many
+    expect(await post(9)).toBeGreaterThanOrEqual(400); // one byte too few
+    expect(await post(1024 * 1024)).toBeGreaterThanOrEqual(400); // far too many
+    expect(await post(10)).toBeLessThan(300); // exactly what was reserved
+    // Nothing was confirmed, so the vault does not list it.
+    await expect(item(page, "exact.bin")).toHaveCount(0);
   });
 
   await test.step("preview files in place", async () => {

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { mutation, MutationCtx, query } from "./_generated/server";
+import { UPLOAD_FORM_LIFETIME_MS } from "./files";
 import { getIdentity, requireVerified } from "./lib/access";
 
 /** The signed-in user's profile, or null when signed out. */
@@ -38,6 +39,19 @@ export async function purgeUser(ctx: MutationCtx, userId: Id<"users">) {
   for (const f of files) await ctx.db.delete(f._id);
   if (keys.length > 0) {
     await ctx.scheduler.runAfter(0, internal.files.deleteObjects, { keys });
+  }
+  // A recent upload form could still write to its key after the account is
+  // gone, so those keys are deleted once more when the forms have expired.
+  const recent = files
+    .filter((f) => f.createdAt + UPLOAD_FORM_LIFETIME_MS > Date.now())
+    .map((f) => f.storageKey)
+    .filter((k) => k.length > 0);
+  if (recent.length > 0) {
+    await ctx.scheduler.runAfter(
+      UPLOAD_FORM_LIFETIME_MS,
+      internal.files.deleteObjects,
+      { keys: recent },
+    );
   }
 
   const folders = await ctx.db

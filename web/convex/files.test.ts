@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-import { STORAGE_LIMIT_BYTES } from "./files";
+import {
+  MAX_URLS_PER_CALL,
+  STORAGE_LIMIT_BYTES,
+  UPLOAD_FORM_LIFETIME_MS,
+} from "./files";
 import {
   errorCode,
   newBackend,
@@ -156,7 +160,8 @@ describe("uploads and quota", () => {
     // The bucket key is built from ids, never from the user's file name.
     expect(form.fields.key).toBe(`test/users/${user.userId}/${form.fileId}`);
     const policy = JSON.parse(atob(form.fields.policy));
-    expect(policy.conditions).toContainEqual(["content-length-range", 0, 5]);
+    // Exactly the reserved size: reusing the form can never store more.
+    expect(policy.conditions).toContainEqual(["content-length-range", 5, 5]);
     expect(policy.conditions).toContainEqual({ key: form.fields.key });
     expect(form.fields["x-amz-signature"]).toMatch(/^[0-9a-f]{64}$/);
 
@@ -173,13 +178,91 @@ describe("uploads and quota", () => {
     expect(link.searchParams.get("response-content-disposition")).toContain("holiday%20photo.jpg");
   });
 
-  test("a reserved upload that never reached the bucket is discarded", async () => {
+  test("an upload that never reached the bucket keeps its quota until the form expires", async () => {
+    vi.useFakeTimers();
     const t = newBackend();
     const user = await signedInUser(t, { verified: true });
-    const form = await user.as.action(api.files.requestUpload, { name: "ghost.bin", size: 5, contentType: "" });
+    await addFile(t, user, "big.bin", { size: STORAGE_LIMIT_BYTES - 100 });
+    const form = await user.as.action(api.files.requestUpload, { name: "ghost.bin", size: 80, contentType: "" });
+
+    // "Completing" before uploading anything must not free the reservation:
+    // the signed form is still valid and could be used afterwards.
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })));
     expect(await errorCode(user.as.action(api.files.completeUpload, { fileId: form.fileId }))).toBe("UPLOAD_MISSING");
+    expect((await t.run((ctx) => ctx.db.get(form.fileId)))?.status).toBe("pending");
+    expect(
+      await errorCode(user.as.action(api.files.requestUpload, { name: "more.bin", size: 80, contentType: "" })),
+    ).toBe("QUOTA_EXCEEDED");
+
+    // Once the form can no longer be used, the reservation and the key go.
+    const deletes: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        deletes.push(`${input.method} ${input.url}`);
+        return new Response(null, { status: 204 });
+      }),
+    );
+    vi.setSystemTime(Date.now() + UPLOAD_FORM_LIFETIME_MS + 1000);
+    await t.mutation(internal.files.cleanupPending, {});
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
     expect(await t.run((ctx) => ctx.db.get(form.fileId))).toBeNull();
+    expect(deletes).toEqual([`DELETE https://bucket.storage.test/${form.fields.key}`]);
+    await user.as.action(api.files.requestUpload, { name: "more.bin", size: 80, contentType: "" });
+  });
+
+  test("an object that is not the announced size is refused and removed", async () => {
+    const t = newBackend();
+    const user = await signedInUser(t, { verified: true });
+    const form = await user.as.action(api.files.requestUpload, { name: "claimed.bin", size: 3, contentType: "" });
+    // The bucket (stubbed above) reports 5 bytes, not the 3 that were reserved.
+    expect(await errorCode(user.as.action(api.files.completeUpload, { fileId: form.fileId }))).toBe("UPLOAD_SIZE_MISMATCH");
+    expect(bucketCalls.at(-1)).toMatchObject({ method: "DELETE" });
+    expect((await user.as.query(api.files.list, {})).files).toEqual([]);
+  });
+
+  test("deleting a fresh upload does not free quota while its form still works", async () => {
+    vi.useFakeTimers();
+    const t = newBackend();
+    const user = await signedInUser(t, { verified: true });
+    await addFile(t, user, "big.bin", { size: STORAGE_LIMIT_BYTES - 100 });
+    const form = await user.as.action(api.files.requestUpload, { name: "five.bin", size: 5, contentType: "" });
+    await user.as.action(api.files.completeUpload, { fileId: form.fileId });
+
+    await user.as.mutation(api.files.remove, { fileIds: [form.fileId], folderIds: [] });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    // Gone from the vault, and the object was deleted from the bucket...
+    expect((await user.as.query(api.files.list, {})).files.map((f) => f.name)).toEqual(["big.bin"]);
+    expect(bucketCalls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    expect(await errorCode(user.as.action(api.files.getUrls, { fileIds: [form.fileId] }))).toBe("NOT_FOUND");
+    // ...but its 5 bytes stay reserved, so the form cannot be replayed for free space.
+    expect(
+      await errorCode(user.as.action(api.files.requestUpload, { name: "again.bin", size: 100, contentType: "" })),
+    ).toBe("QUOTA_EXCEEDED");
+    // The name is free again straight away.
+    const same = await user.as.action(api.files.requestUpload, { name: "five.bin", size: 5, contentType: "" });
+    expect(same.name).toBe("five.bin");
+
+    // After the form expires the key is deleted once more and the quota returns.
+    vi.setSystemTime(Date.now() + UPLOAD_FORM_LIFETIME_MS + 1000);
+    await t.mutation(internal.files.cleanupPending, {});
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await t.run((ctx) => ctx.db.get(form.fileId))).toBeNull();
+    expect(
+      bucketCalls.filter((c) => c.method === "DELETE" && c.url.endsWith(form.fields.key)),
+    ).toHaveLength(2);
+    await user.as.action(api.files.requestUpload, { name: "again.bin", size: 100, contentType: "" });
+  });
+
+  test("link requests are capped, and the cap is what the vault page batches by", async () => {
+    const t = newBackend();
+    const user = await signedInUser(t, { verified: true });
+    const id = await addFile(t, user, "a.txt");
+    const tooMany = Array.from({ length: MAX_URLS_PER_CALL + 1 }, () => id);
+    expect(await errorCode(user.as.action(api.files.getUrls, { fileIds: tooMany }))).toBe("TOO_MANY");
+    const atLimit = Array.from({ length: MAX_URLS_PER_CALL }, () => id);
+    expect(Object.keys(await user.as.action(api.files.getUrls, { fileIds: atLimit }))).toEqual([id]);
+    expect(MAX_URLS_PER_CALL).toBe(200);
   });
 
   test("the storage limit counts finished and in-progress uploads", async () => {
@@ -212,7 +295,7 @@ describe("uploads and quota", () => {
     const t = newBackend();
     const user = await signedInUser(t, { verified: true });
     const form = await user.as.action(api.files.requestUpload, { name: "slow.bin", size: 5, contentType: "" });
-    await t.run((ctx) => ctx.db.patch(form.fileId, { createdAt: Date.now() - 2 * 60 * 60 * 1000 }));
+    await t.run((ctx) => ctx.db.patch(form.fileId, { createdAt: Date.now() - UPLOAD_FORM_LIFETIME_MS - 1000 }));
     await t.mutation(internal.files.cleanupPending, {});
     await t.finishAllScheduledFunctions(vi.runAllTimers);
     expect(await t.run((ctx) => ctx.db.get(form.fileId))).toBeNull();
@@ -245,6 +328,10 @@ describe("account deletion", () => {
     expect(left.folders).toEqual([]);
     expect(left.faceSessions).toEqual([other.userId]);
     expect(left.sessions).toEqual([other.userId]);
-    expect(bucketCalls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    // The one object is deleted at once, and once more after its upload
+    // form has expired, in case the form is used after the account is gone.
+    const deleted = bucketCalls.filter((c) => c.method === "DELETE").map((c) => c.url);
+    expect(deleted).toHaveLength(2);
+    expect(new Set(deleted).size).toBe(1);
   });
 });

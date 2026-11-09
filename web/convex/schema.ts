@@ -63,7 +63,15 @@ export default defineSchema({
     size: v.number(),
     contentType: v.string(),
     storageKey: v.string(),
-    status: v.union(v.literal("pending"), v.literal("ready")),
+    // pending: upload reserved, not confirmed yet.
+    // ready:   confirmed in the bucket and visible in the vault.
+    // deleted: removed by the user while its upload form could still be
+    //          reused. It keeps holding its quota until that form expires.
+    status: v.union(
+      v.literal("pending"),
+      v.literal("ready"),
+      v.literal("deleted"),
+    ),
     createdAt: v.number(),
   })
     .index("by_user_folder", ["userId", "folderId"])

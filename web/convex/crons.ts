@@ -6,7 +6,7 @@ const crons = cronJobs();
 crons.interval("clean up face data", { hours: 1 }, internal.face.cleanup);
 crons.interval(
   "clean up unfinished uploads",
-  { hours: 1 },
+  { minutes: 10 },
   internal.files.cleanupPending,
 );
 

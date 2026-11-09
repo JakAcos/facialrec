@@ -94,12 +94,13 @@ function hex(buf: ArrayBuffer): string {
 
 /**
  * A signed browser upload form (S3 "POST policy"). Unlike a plain presigned
- * PUT, the policy lets the bucket itself enforce the maximum size, so a
- * client cannot upload more than its remaining quota.
+ * PUT, the policy lets the bucket itself enforce the size. The form only
+ * accepts an object of exactly `bytes` bytes, so however often it is used
+ * before it expires, the stored size always equals what was reserved.
  */
 export async function presignPost(
   key: string,
-  opts: { expiresIn: number; maxBytes: number; contentType: string },
+  opts: { expiresIn: number; bytes: number; contentType: string },
 ): Promise<{ url: string; fields: Record<string, string> }> {
   const c = config();
   const now = new Date();
@@ -113,7 +114,7 @@ export async function presignPost(
       { bucket: c.bucket },
       { key },
       { "Content-Type": opts.contentType },
-      ["content-length-range", 0, opts.maxBytes],
+      ["content-length-range", opts.bytes, opts.bytes],
       { "x-amz-algorithm": "AWS4-HMAC-SHA256" },
       { "x-amz-credential": credential },
       { "x-amz-date": amzDate },

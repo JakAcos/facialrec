@@ -50,13 +50,7 @@ export async function expectVaultUnlocked(page: Page) {
  * session would do.
  */
 export async function listFilesDirectly(page: Page): Promise<string> {
-  const token = await page.evaluate(() => {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i)!;
-      if (key.startsWith("__convexAuthJWT")) return localStorage.getItem(key);
-    }
-    return null;
-  });
+  const token = await loginToken(page);
   if (!token) return "NO_TOKEN";
   const client = new ConvexHttpClient(convexUrl());
   client.setAuth(token);
@@ -68,6 +62,28 @@ export async function listFilesDirectly(page: Page): Promise<string> {
     const data = (error as { data?: { code?: string } }).data;
     return data?.code ?? text;
   }
+}
+
+async function loginToken(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)!;
+      if (key.startsWith("__convexAuthJWT")) return localStorage.getItem(key);
+    }
+    return null;
+  });
+}
+
+/** Requests a signed upload form with this browser's login, bypassing the UI. */
+export async function requestUploadDirectly(
+  page: Page,
+  file: { name: string; size: number; contentType: string },
+) {
+  const token = await loginToken(page);
+  if (!token) throw new Error("not signed in");
+  const client = new ConvexHttpClient(convexUrl());
+  client.setAuth(token);
+  return await client.action(api.files.requestUpload, file);
 }
 
 export function item(page: Page, name: string) {

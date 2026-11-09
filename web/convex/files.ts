@@ -21,9 +21,21 @@ import { deleteObject, headObject, presignGet, presignPost } from "./lib/s3";
 /** Storage allowance per account. */
 export const STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 const MAX_NAME_LENGTH = 200;
+/** The vault page batches its requests to this size (URL_BATCH there). */
+export const MAX_URLS_PER_CALL = 200;
 const UPLOAD_URL_SECONDS = 15 * 60;
 const VIEW_URL_SECONDS = 60 * 60;
-const PENDING_UPLOAD_TTL_MS = 60 * 60 * 1000;
+/**
+ * How long a signed upload form can still write to its bucket key, plus a
+ * safety margin. Until this has passed, the file's quota stays reserved,
+ * even if the upload was abandoned or the file was deleted, because the
+ * form could still be used to put an object there.
+ */
+export const UPLOAD_FORM_LIFETIME_MS = (UPLOAD_URL_SECONDS + 60) * 1000;
+
+function formStillUsable(file: Doc<"files">): boolean {
+  return file.createdAt + UPLOAD_FORM_LIFETIME_MS > Date.now();
+}
 
 function cleanName(raw: string): string {
   const name = raw.trim();
@@ -60,12 +72,16 @@ async function ownedFile(
   fileId: Id<"files">,
 ): Promise<Doc<"files">> {
   const file = await ctx.db.get(fileId);
-  if (file === null || file.userId !== userId) {
+  if (file === null || file.userId !== userId || file.status === "deleted") {
     throw new ConvexError({ code: "NOT_FOUND", message: "File not found." });
   }
   return file;
 }
 
+/**
+ * Bytes that count against the quota: finished files, uploads in progress,
+ * and recently deleted files whose upload form could still be reused.
+ */
 async function usedBytes(
   ctx: QueryCtx | MutationCtx,
   userId: Id<"users">,
@@ -90,13 +106,15 @@ function siblings(
           q.eq("userId", userId).eq("parentId", folderId),
         )
         .collect(),
-    files: () =>
-      ctx.db
-        .query("files")
-        .withIndex("by_user_folder", (q) =>
-          q.eq("userId", userId).eq("folderId", folderId),
-        )
-        .collect(),
+    files: async () =>
+      (
+        await ctx.db
+          .query("files")
+          .withIndex("by_user_folder", (q) =>
+            q.eq("userId", userId).eq("folderId", folderId),
+          )
+          .collect()
+      ).filter((f) => f.status !== "deleted"),
   };
 }
 
@@ -346,6 +364,20 @@ export const move = mutation({
   },
 });
 
+/**
+ * Removes one file's database row and returns its bucket key. A file whose
+ * upload form is still usable is kept as a hidden "deleted" row instead, so
+ * its quota stays reserved until the form expires (see cleanupPending).
+ */
+async function discardFile(ctx: MutationCtx, file: Doc<"files">): Promise<string> {
+  if (formStillUsable(file)) {
+    await ctx.db.patch(file._id, { status: "deleted", folderId: undefined });
+  } else {
+    await ctx.db.delete(file._id);
+  }
+  return file.storageKey;
+}
+
 /** Deletes files and folders, including everything inside the folders. */
 export const remove = mutation({
   args: { fileIds: v.array(v.id("files")), folderIds: v.array(v.id("folders")) },
@@ -363,24 +395,24 @@ export const remove = mutation({
       const inside = siblings(ctx, userId, folderId);
       for (const child of await inside.folders()) queue.push(child._id);
       for (const file of await inside.files()) {
-        keys.push(file.storageKey);
-        await ctx.db.delete(file._id);
+        keys.push(await discardFile(ctx, file));
       }
       await ctx.db.delete(folderId);
     }
     for (const fileId of args.fileIds) {
       const file = await ctx.db.get(fileId);
-      if (file === null) continue; // already removed with its folder
+      // Already removed together with its folder a moment ago.
+      if (file === null || file.status === "deleted") continue;
       if (file.userId !== userId) {
         throw new ConvexError({ code: "NOT_FOUND", message: "File not found." });
       }
-      keys.push(file.storageKey);
-      await ctx.db.delete(file._id);
+      keys.push(await discardFile(ctx, file));
     }
 
-    // The database rows are gone now; the bucket objects follow right after.
-    if (keys.length > 0) {
-      await ctx.scheduler.runAfter(0, internal.files.deleteObjects, { keys });
+    // The bucket objects follow right after the database change.
+    const real = keys.filter((k) => k.length > 0);
+    if (real.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.files.deleteObjects, { keys: real });
     }
   },
 });
@@ -468,8 +500,8 @@ export const requestUpload = action({
     });
     const form = await presignPost(reserved.storageKey, {
       expiresIn: UPLOAD_URL_SECONDS,
-      // The bucket rejects anything larger than what was reserved.
-      maxBytes: args.size,
+      // The bucket only accepts exactly the number of bytes that was reserved.
+      bytes: args.size,
       contentType,
     });
     return { fileId: reserved.fileId, name: reserved.name, ...form };
@@ -489,15 +521,11 @@ export const pendingUpload = internalQuery({
 });
 
 export const finalizeUpload = internalMutation({
-  args: { fileId: v.id("files"), size: v.union(v.number(), v.null()) },
+  args: { fileId: v.id("files") },
   handler: async (ctx, args) => {
     const file = await ctx.db.get(args.fileId);
-    if (file === null) return;
-    if (args.size === null) {
-      await ctx.db.delete(file._id);
-      return;
-    }
-    await ctx.db.patch(file._id, { size: args.size, status: "ready" });
+    if (file === null || file.status !== "pending") return;
+    await ctx.db.patch(file._id, { status: "ready" });
   },
 });
 
@@ -511,18 +539,24 @@ export const completeUpload = action({
       fileId: args.fileId,
     });
     if (file.status === "ready") return { ok: true };
-    // Trust the bucket, not the browser, for the real size.
+    // Trust the bucket, not the browser, for what is really stored.
     const size = await headObject(file.storageKey);
-    await ctx.runMutation(internal.files.finalizeUpload, {
-      fileId: file._id,
-      size,
-    });
     if (size === null) {
       throw new ConvexError({
         code: "UPLOAD_MISSING",
         message: "The upload did not finish. Please try again.",
       });
     }
+    // The signed form only accepts the reserved size. Checking again here
+    // means the quota holds even if a bucket were to ignore that rule.
+    if (size !== file.size) {
+      await deleteObject(file.storageKey);
+      throw new ConvexError({
+        code: "UPLOAD_SIZE_MISMATCH",
+        message: "The upload did not match the file that was announced.",
+      });
+    }
+    await ctx.runMutation(internal.files.finalizeUpload, { fileId: file._id });
     return { ok: true };
   },
 });
@@ -549,7 +583,7 @@ export const getUrls = action({
   args: { fileIds: v.array(v.id("files")), download: v.optional(v.boolean()) },
   handler: async (ctx, args): Promise<Record<string, string>> => {
     const identity = await requireIdentity(ctx);
-    if (args.fileIds.length > 200) {
+    if (args.fileIds.length > MAX_URLS_PER_CALL) {
       throw new ConvexError({ code: "TOO_MANY", message: "Too many files." });
     }
     const files: Doc<"files">[] = await ctx.runQuery(
@@ -596,19 +630,29 @@ export const folderContents = query({
   },
 });
 
-/** Housekeeping: uploads that were reserved but never finished. */
+/**
+ * Housekeeping, run once the upload form for a file can no longer be used:
+ * drops uploads that were never finished and deleted files that were only
+ * kept to hold their quota. Their bucket keys are deleted (again) in case
+ * the form was used after the file was abandoned or removed.
+ */
 export const cleanupPending = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const cutoff = Date.now() - PENDING_UPLOAD_TTL_MS;
-    const stale = await ctx.db
-      .query("files")
-      .withIndex("by_status", (q) =>
-        q.eq("status", "pending").lt("createdAt", cutoff),
-      )
-      .take(200);
-    const keys = stale.map((f) => f.storageKey).filter((k) => k.length > 0);
-    for (const file of stale) await ctx.db.delete(file._id);
+    const cutoff = Date.now() - UPLOAD_FORM_LIFETIME_MS;
+    const keys: string[] = [];
+    for (const status of ["pending", "deleted"] as const) {
+      const stale = await ctx.db
+        .query("files")
+        .withIndex("by_status", (q) =>
+          q.eq("status", status).lt("createdAt", cutoff),
+        )
+        .take(200);
+      for (const file of stale) {
+        if (file.storageKey.length > 0) keys.push(file.storageKey);
+        await ctx.db.delete(file._id);
+      }
+    }
     if (keys.length > 0) {
       await ctx.scheduler.runAfter(0, internal.files.deleteObjects, { keys });
     }
