@@ -1,0 +1,46 @@
+{
+  "name": "facialrec-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "node scripts/copy-mediapipe.mjs",
+    "dev": "next dev",
+    "prebuild": "node scripts/copy-mediapipe.mjs",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p convex",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@convex-dev/auth": "0.0.96",
+    "@mediapipe/tasks-vision": "^1.2.2",
+    "aws4fetch": "^1.0.20",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "convex": "^1.49.0",
+    "fflate": "^0.8.3",
+    "lucide-react": "^1.70.0",
+    "next": "16.4.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.7.0"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
+    "@playwright/test": "^1.65.0",
+    "@tailwindcss/turbopack": "4.3.3",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "convex-test": "^0.0.67",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "jose": "^6.2.17",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5",
+    "vitest": "^5.1.0"
+  }
+}
