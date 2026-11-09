@@ -78,8 +78,8 @@ function triggerDownload(url: string, name?: string) {
   a.remove();
 }
 
-/** Signed links last an hour on the server. Refresh ours a little before that. */
-const THUMBNAIL_MAX_AGE_MS = 50 * 60 * 1000;
+/** Signed links last 15 minutes on the server. Refresh ours a little before that. */
+const THUMBNAIL_MAX_AGE_MS = 12 * 60 * 1000;
 
 /** Signed thumbnail links for the images on screen, fetched in one batch. */
 function useThumbnails(files: VaultFile[]) {
@@ -91,7 +91,7 @@ function useThumbnails(files: VaultFile[]) {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    const timer = setInterval(() => setTick((n) => n + 1), 5 * 60 * 1000);
+    const timer = setInterval(() => setTick((n) => n + 1), 60 * 1000);
     return () => clearInterval(timer);
   }, []);
 

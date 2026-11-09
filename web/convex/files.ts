@@ -24,7 +24,12 @@ const MAX_NAME_LENGTH = 200;
 /** The vault page batches its requests to this size (URL_BATCH there). */
 export const MAX_URLS_PER_CALL = 200;
 const UPLOAD_URL_SECONDS = 15 * 60;
-const VIEW_URL_SECONDS = 60 * 60;
+/**
+ * How long a signed view or download link works. A link keeps working after
+ * the vault is locked, so this is kept short. The vault page refreshes its
+ * thumbnail links before they run out (THUMBNAIL_MAX_AGE_MS there).
+ */
+const VIEW_URL_SECONDS = 15 * 60;
 /**
  * How long a signed upload form can still write to its bucket key, plus a
  * safety margin. Until this has passed, the file's quota stays reserved,

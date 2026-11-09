@@ -80,7 +80,8 @@ export const status = query({
 
 /**
  * Starts a face check. The server, not the browser, picks which way the head
- * must turn, so a recording made in advance is unlikely to match.
+ * must turn. That stops one still image. It does not stop a recording or a
+ * set of photos that happens to contain the requested turn (see the README).
  */
 export const startChallenge = mutation({
   args: { reenroll: v.optional(v.boolean()) },
@@ -320,6 +321,8 @@ type ServiceFrame = {
   embedding: number[] | null;
 };
 
+class RejectedFrames extends Error {}
+
 /** Sends the frames to the face service, which only measures and decides nothing. */
 async function analyzeFrames(
   frames: ArrayBuffer[],
@@ -332,6 +335,9 @@ async function analyzeFrames(
     headers: { "content-type": "application/json", "x-face-secret": secret },
     body: JSON.stringify({ frames: frames.map(toBase64) }),
   });
+  // The service refused what the caller sent (not an image, or too large).
+  // That is the caller's doing, unlike an outage, so it counts as an attempt.
+  if ([400, 413, 422].includes(res.status)) throw new RejectedFrames();
   if (!res.ok) throw new Error(`Face service returned ${res.status}`);
   const body = (await res.json()) as { model: string; frames: ServiceFrame[] };
   return {
@@ -395,8 +401,17 @@ export const submit = action({
     } else {
       try {
         analysis = await analyzeFrames(args.frames);
-      } catch {
-        // Not the user's fault, so it must not eat into their attempts.
+      } catch (error) {
+        if (error instanceof RejectedFrames) {
+          await finish("failure", { reason: "BAD_IMAGE" });
+          return {
+            ok: false,
+            kind: attempt.kind,
+            reason: "BAD_IMAGE",
+            message: FAILURE_MESSAGES.BAD_IMAGE,
+          };
+        }
+        // An outage is not the user's fault, so it must not use up their attempts.
         await finish("void");
         throw new ConvexError({
           code: "FACE_SERVICE_UNAVAILABLE",

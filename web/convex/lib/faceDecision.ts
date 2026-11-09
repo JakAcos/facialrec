@@ -25,6 +25,7 @@ export type FrameAnalysis = {
 
 export type FailureReason =
   | "WRONG_FRAME_COUNT"
+  | "BAD_IMAGE"
   | "NO_FACE"
   | "MULTIPLE_FACES"
   | "FACE_TOO_SMALL"
@@ -167,6 +168,7 @@ export function decideVerify(
 /** Friendly text for each failure, shown on the face check screen. */
 export const FAILURE_MESSAGES: Record<FailureReason, string> = {
   WRONG_FRAME_COUNT: "The capture was incomplete. Please try again.",
+  BAD_IMAGE: "The camera frames could not be read. Please try again.",
   NO_FACE: "We could not see a clear face. Check your lighting and try again.",
   MULTIPLE_FACES: "More than one face is in view. Make sure you are alone in the frame.",
   FACE_TOO_SMALL: "Move a little closer to the camera and try again.",

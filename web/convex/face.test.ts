@@ -297,6 +297,23 @@ describe("face enrollment and verification", () => {
     expect(await errorCode(begin(ids[MAX_FAILED_VERIFIES]))).toBe("LOCKED");
   });
 
+  test("unreadable frames count as failed attempts", async () => {
+    const t = newBackend();
+    const owner = await signedInUser(t);
+    await faceCheck(owner, 0);
+    const session = await signedInUser(t, { userId: owner.userId });
+    fetchMock.mockImplementation(async () => new Response("bad image", { status: 400 }));
+    for (let i = 0; i < MAX_FAILED_VERIFIES; i++) {
+      const challenge = await session.as.mutation(api.face.startChallenge, {});
+      const result = await session.as.action(api.face.submit, {
+        challengeId: challenge.challengeId,
+        frames: challenge.steps.map(jpeg),
+      });
+      expect(result).toMatchObject({ ok: false, reason: "BAD_IMAGE" });
+    }
+    expect(await errorCode(session.as.mutation(api.face.startChallenge, {}))).toBe("LOCKED");
+  });
+
   test("a face service outage does not use up attempts", async () => {
     const t = newBackend();
     const owner = await signedInUser(t);
