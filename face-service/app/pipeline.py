@@ -400,5 +400,10 @@ def decode_image(data: bytes, max_side: int = 1280) -> np.ndarray | None:
     h, w = image.shape[:2]
     if max(h, w) > max_side:
         ratio = max_side / max(h, w)
-        image = cv2.resize(image, (int(w * ratio), int(h * ratio)))
+        new_w, new_h = int(w * ratio), int(h * ratio)
+        # A very thin image (say 1x2000) would shrink to zero pixels wide,
+        # which OpenCV refuses. Nothing that thin can contain a face.
+        if new_w < 1 or new_h < 1:
+            return None
+        image = cv2.resize(image, (new_w, new_h))
     return image

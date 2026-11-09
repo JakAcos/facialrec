@@ -140,3 +140,12 @@ def test_normal_frames_decode_and_other_formats_are_refused():
     assert decode_image(bmp.tobytes()) is None
     assert decode_image(b"") is None
     assert decode_image(b"\xff\xd8\xff") is None
+
+
+def test_extremely_thin_image_is_refused_not_a_server_error(client):
+    # 1x2000 would shrink to zero pixels wide when scaled down to 1280.
+    ok, buf = cv2.imencode(".png", np.zeros((2000, 1, 3), np.uint8))
+    assert ok
+    thin = base64.b64encode(buf.tobytes()).decode()
+    res = client.post("/analyze", json={"frames": [thin]}, headers={"x-face-secret": "test-secret"})
+    assert res.status_code == 400
