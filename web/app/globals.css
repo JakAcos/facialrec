@@ -1,40 +1,48 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f7f8;
+  /* Plain greys with no blue tint, black for actions, and one orange
+     accent kept for the brand mark, selection and the face guide. */
+  --background: #fafafa;
   --surface: #ffffff;
-  --surface-2: #f1f1f3;
-  --foreground: #17171a;
-  --muted: #6b6b76;
-  --border: #e3e3e8;
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-soft: #eef0ff;
+  --surface-2: #f2f2f2;
+  --foreground: #111111;
+  --muted: #6b6b6b;
+  --border: #e5e5e5;
+  --ink: #111111;
+  --ink-hover: #2b2b2b;
+  --ink-foreground: #ffffff;
+  --accent: #e0480f;
+  --accent-text: #b53a0c;
+  --accent-soft: #fff1ea;
   --accent-foreground: #ffffff;
   --danger: #d92d20;
   --danger-soft: #fef1f0;
   --success: #12924f;
   --success-soft: #e9f8ef;
-  --warning: #b45309;
+  --warning: #a16207;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0d0d10;
-    --surface: #17171c;
-    --surface-2: #202027;
-    --foreground: #f1f1f4;
-    --muted: #9a9aa8;
-    --border: #2b2b34;
-    --accent: #7c75ff;
-    --accent-hover: #918bff;
-    --accent-soft: #1f1e3a;
-    --accent-foreground: #0d0d10;
+    --background: #0b0b0b;
+    --surface: #151515;
+    --surface-2: #1f1f1f;
+    --foreground: #f2f2f2;
+    --muted: #9a9a9a;
+    --border: #2a2a2a;
+    --ink: #f2f2f2;
+    --ink-hover: #d4d4d4;
+    --ink-foreground: #0b0b0b;
+    --accent: #ff6b35;
+    --accent-text: #ff8f66;
+    --accent-soft: #2a170e;
+    --accent-foreground: #0b0b0b;
     --danger: #ff6b5e;
     --danger-soft: #2c1614;
     --success: #3ecf82;
     --success-soft: #112319;
-    --warning: #f0a84b;
+    --warning: #eab308;
   }
 }
 
@@ -45,8 +53,11 @@
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-border: var(--border);
+  --color-ink: var(--ink);
+  --color-ink-hover: var(--ink-hover);
+  --color-ink-foreground: var(--ink-foreground);
   --color-accent: var(--accent);
-  --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
   --color-accent-soft: var(--accent-soft);
   --color-accent-foreground: var(--accent-foreground);
   --color-danger: var(--danger);

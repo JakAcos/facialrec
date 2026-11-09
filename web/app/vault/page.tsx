@@ -440,7 +440,7 @@ function Vault() {
               className={cn(
                 "cursor-pointer rounded-full border px-3 py-1 text-xs font-medium",
                 filter === f.id
-                  ? "border-accent bg-accent-soft text-accent"
+                  ? "border-accent/60 bg-accent-soft text-accent-text"
                   : "border-border text-muted hover:text-foreground",
               )}
             >
@@ -486,7 +486,7 @@ function Vault() {
       {/* Bulk actions */}
       {selectedItems.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-accent-soft px-3 py-2 text-sm" data-testid="bulk-bar">
-          <span className="font-medium text-accent">{selectedItems.length} selected</span>
+          <span className="font-medium text-accent-text">{selectedItems.length} selected</span>
           <div className="ml-auto flex gap-1">
             <Button variant="ghost" size="sm" onClick={() => setDialog({ type: "move", items: selectedItems })} data-testid="bulk-move">
               <FolderInput className="h-4 w-4" aria-hidden /> Move

@@ -42,5 +42,5 @@ export function FileIcon({
 }
 
 export function FolderIcon({ className }: { className?: string }) {
-  return <Folder className={cn("fill-accent/20 text-accent", className)} aria-hidden />;
+  return <Folder className={cn("fill-muted/20 text-muted", className)} aria-hidden />;
 }

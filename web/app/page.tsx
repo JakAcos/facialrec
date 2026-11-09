@@ -2,7 +2,7 @@
 
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
-import { CloudUpload, KeyRound, ScanFace, ShieldCheck } from "lucide-react";
+import { CloudUpload, KeyRound, ScanFace } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Logo } from "@/components/logo";
@@ -117,11 +117,7 @@ function Landing() {
         <Logo className="text-lg" />
       </header>
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center px-6 pb-16 pt-10 sm:pt-20">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-muted">
-          <ShieldCheck className="h-3.5 w-3.5 text-success" aria-hidden />
-          Two checks before anything opens
-        </span>
-        <h1 className="mt-5 max-w-2xl text-balance text-center text-4xl font-semibold tracking-tight sm:text-6xl">
+        <h1 className="max-w-2xl text-balance text-center text-4xl font-semibold tracking-tight sm:text-6xl">
           Your files, locked to your face.
         </h1>
         <p className="mt-5 max-w-xl text-pretty text-center text-lg text-muted">
@@ -134,7 +130,7 @@ function Landing() {
             onClick={google}
             loading={busy}
             data-testid="google-sign-in"
-            className="w-full max-w-sm bg-foreground text-background hover:bg-foreground hover:opacity-90"
+            className="w-full max-w-sm"
           >
             {!busy && <GoogleMark />}
             Continue with Google
@@ -142,17 +138,15 @@ function Landing() {
           {testLogin && <TestLogin />}
         </div>
 
-        <ol className="mt-16 grid w-full gap-4 sm:grid-cols-3">
+        <ol className="mt-20 grid w-full gap-8 border-t border-border pt-8 sm:grid-cols-3 sm:gap-10">
           {STEPS.map((step, i) => (
-            <li key={step.title} className="rounded-2xl border border-border bg-surface p-5">
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                  <step.icon className="h-5 w-5" aria-hidden />
-                </span>
-                <span className="text-xs font-medium text-muted">Step {i + 1}</span>
+            <li key={step.title}>
+              <div className="flex items-center gap-2 text-muted">
+                <span className="font-mono text-xs">0{i + 1}</span>
+                <step.icon className="h-4 w-4" aria-hidden />
               </div>
-              <h2 className="mt-4 font-semibold">{step.title}</h2>
-              <p className="mt-1 text-sm text-muted">{step.body}</p>
+              <h2 className="mt-3 font-semibold">{step.title}</h2>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted">{step.body}</p>
             </li>
           ))}
         </ol>

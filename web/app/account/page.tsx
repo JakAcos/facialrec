@@ -18,7 +18,7 @@ const KIND_COLORS: Record<string, string> = {
   Images: "#10b981",
   Videos: "#f43f5e",
   Audio: "#f59e0b",
-  Documents: "#6366f1",
+  Documents: "#0ea5e9",
   Other: "#94a3b8",
 };
 
@@ -62,7 +62,7 @@ function Account() {
             // eslint-disable-next-line @next/next/no-img-element -- external Google avatar
             <img src={me.image} alt="" referrerPolicy="no-referrer" className="h-14 w-14 rounded-full border border-border" />
           ) : (
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-xl font-semibold text-accent">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-xl font-semibold text-accent-text">
               {initial}
             </span>
           )}

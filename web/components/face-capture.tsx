@@ -382,7 +382,7 @@ export function FaceCapture({
               i < stepIndex
                 ? "border-success/40 bg-success-soft text-success"
                 : i === stepIndex
-                  ? "border-accent/50 bg-accent-soft text-accent"
+                  ? "border-accent/60 bg-accent-soft text-accent-text"
                   : "border-border text-muted",
             )}
           >

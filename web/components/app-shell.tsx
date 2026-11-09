@@ -78,7 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 className="ml-1 h-8 w-8 rounded-full border border-border"
               />
             ) : (
-              <span className="ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent">
+              <span className="ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent-text">
                 {initial}
               </span>
             )}

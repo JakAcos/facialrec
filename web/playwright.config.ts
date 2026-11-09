@@ -25,6 +25,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     viewport: { width: 1280, height: 800 },
+    // E2E_COLOR_SCHEME=dark captures the screenshots in dark mode.
+    colorScheme: process.env.E2E_COLOR_SCHEME === "dark" ? "dark" : "light",
     video: "on",
     screenshot: "on",
     trace: "retain-on-failure",
