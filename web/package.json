@@ -7,6 +7,7 @@
     "dev": "next dev",
     "prebuild": "node scripts/copy-mediapipe.mjs",
     "build": "next build",
+    "build:deploy": "convex deploy --cmd 'npm run build'",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
