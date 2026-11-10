@@ -177,10 +177,18 @@ deployment and never on production.
 
 ## Deploying
 
-- **Convex:** `cd web && npx convex deploy`
-- **Railway `web` service:** root directory `/web`, with
-  `NEXT_PUBLIC_CONVEX_URL` set to the production Convex URL.
-- **Railway `face` service:** root directory `/face-service`, built from its
-  Dockerfile, with `FACE_SERVICE_SECRET` set to the same value as in Convex.
+Every push to `master` deploys automatically. Nothing needs running by hand.
+
+- **Railway `web` service:** connected to GitHub, root directory `/web`. It
+  redeploys when anything under `web/` changes. Its build command is
+  `npm run build:deploy`, which builds the site and then deploys the Convex
+  backend, so the two always go out together. This needs `CONVEX_DEPLOY_KEY`
+  (a production deploy key) and `NEXT_PUBLIC_CONVEX_URL` set on the service.
+- **Railway `face` service:** connected to GitHub, root directory
+  `/face-service`, built from its Dockerfile, health check `/health`. It
+  redeploys when anything under `face-service/` changes, and needs
+  `FACE_SERVICE_SECRET` set to the same value as in Convex.
+- **Manual deploy, if ever needed:** `cd web && npx convex deploy` for the
+  backend, or `railway up --service web` / `--service face`.
 - **Google OAuth:** the authorised redirect URI is
   `https://<deployment>.convex.site/api/auth/callback/google`.
